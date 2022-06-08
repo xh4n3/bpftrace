@@ -149,6 +149,7 @@ private:
 
   void binop_string(Binop &binop);
   void binop_buf(Binop &binop);
+  void binop_array(Binop &binop);
   void binop_int(Binop &binop);
   void binop_ptr(Binop &binop);
 

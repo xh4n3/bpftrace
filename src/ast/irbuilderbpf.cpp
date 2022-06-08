@@ -764,7 +764,7 @@ Value *IRBuilderBPF::CreateStrncmp(Value *val1,
 
   auto *val1p = dyn_cast<PointerType>(val1->getType());
   auto *val2p = dyn_cast<PointerType>(val2->getType());
-#ifndef NDEBUG
+//#ifndef NDEBUG
   if (!literal1)
   {
     assert(val1p);
@@ -779,7 +779,7 @@ Value *IRBuilderBPF::CreateStrncmp(Value *val1,
            val2p->getPointerElementType()->getArrayElementType() ==
                getInt8Ty());
   }
-#endif
+//#endif
 
   Function *parent = GetInsertBlock()->getParent();
   AllocaInst *store = CreateAllocaBPF(getInt1Ty(), "strcmp.result");
@@ -795,6 +795,7 @@ Value *IRBuilderBPF::CreateStrncmp(Value *val1,
   Value *null_byte = getInt8(0);
   for (size_t i = 0; i < n; i++)
   {
+    std::cout << "CreateStrncmp i=" << i << " of n=" << n << "\n";
     BasicBlock *char_eq = BasicBlock::Create(module_.getContext(),
                                              "strcmp.loop",
                                              parent);

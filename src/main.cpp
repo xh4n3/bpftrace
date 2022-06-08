@@ -970,7 +970,8 @@ int main(int argc, char* argv[])
     return 0;
 
   if (args.build_mode == BuildMode::AHEAD_OF_TIME)
-    return aot::generate(bpftrace.resources, bytecode, args.aot);
+    return 0;
+//    return aot::generate(bpftrace.resources, bytecode, args.aot);
 
   // Signal handler that lets us know an exit signal was received.
   struct sigaction act = {};

@@ -342,6 +342,7 @@ void perf_event_printer(void *cb_cookie, void *data, int size)
     bpftrace->request_finalize();
     return;
   }
+  std::cout << "data printf_id " << printf_id << "\n";
 
   // async actions
   if (printf_id == asyncactionint(AsyncAction::exit))
@@ -576,6 +577,8 @@ void perf_event_printer(void *cb_cookie, void *data, int size)
   auto &args = std::get<1>(bpftrace->resources.printf_args[printf_id]);
   auto arg_values = bpftrace->get_arg_values(args, arg_data);
 
+//  std::cout << "fmt " << fmt.str() << " args " << args.size() << "\n";
+
   bpftrace->out_->message(MessageType::printf,
                           fmt.format_str(arg_values),
                           false);
@@ -587,9 +590,11 @@ std::vector<std::unique_ptr<IPrintable>> BPFtrace::get_arg_values(const std::vec
 
   for (auto arg : args)
   {
+//    std::cout << "arg type " << arg.type << "\n";
     switch (arg.type.type)
     {
       case Type::integer:
+//        std::cout << "arg type is int sign " << arg.type.IsSigned() << " width " << arg.type.GetIntBitWidth()  <<  "\n";
         if (arg.type.IsSigned())
         {
           int64_t val = 0;
@@ -732,6 +737,13 @@ std::vector<std::unique_ptr<IPrintable>> BPFtrace::get_arg_values(const std::vec
                                     ->cgroup_id)));
         break;
         // fall through
+      case Type::array:
+      {
+        std::string array_str = "array";
+        arg_values.push_back(std::make_unique<PrintableString>(array_str));
+        break;
+
+      }
       default:
         LOG(FATAL) << "invalid argument type";
     }

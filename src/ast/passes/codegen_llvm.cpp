@@ -563,6 +563,10 @@ void CodegenLLVM::visit(Call &call)
     }
 
     auto elements = AsyncEvent::Buf().asLLVMType(b_, fixed_buffer_length);
+//    return {
+//      b.getInt8Ty(),                               // buffer length
+//      llvm::ArrayType::get(b.getInt8Ty(), length), // buffer content
+//    };
     std::ostringstream dynamic_sized_struct_name;
     dynamic_sized_struct_name << "buffer_" << fixed_buffer_length << "_t";
     StructType *buf_struct = b_.GetStructType(dynamic_sized_struct_name.str(),
@@ -573,18 +577,22 @@ void CodegenLLVM::visit(Call &call)
     Value *buf_len_offset = b_.CreateGEP(buf_struct,
                                          buf,
                                          { b_.getInt32(0), b_.getInt32(0) });
+    // cast length to llvm value
     length = b_.CreateIntCast(length, buf_struct->getElementType(0), false);
+    // store length to buffer->length
     b_.CreateStore(length, buf_len_offset);
 
     Value *buf_data_offset = b_.CreateGEP(buf_struct,
                                           buf,
                                           { b_.getInt32(0), b_.getInt32(1) });
+    // use memset to init buffer->content with uint8 zeros
     b_.CREATE_MEMSET(buf_data_offset,
                      b_.GetIntSameSize(0, elements.at(0)),
                      fixed_buffer_length,
                      1);
 
     auto scoped_del = accept(call.vargs->front());
+    // the buffer ptr
     auto arg0 = call.vargs->front();
     // arg0 is already on the bpf stack -> use memcpy
     // otherwise -> probe read in addrspace of arg0->type
@@ -733,18 +741,22 @@ void CodegenLLVM::visit(Call &call)
     //   }
     // }
     //}
-    std::vector<llvm::Type *> elements = { b_.getInt64Ty(),
-                                           ArrayType::get(b_.getInt8Ty(), 16) };
+    // try to dig a little bit of this issue
+    // https://github.com/iovisor/bpftrace/issues/761
+    std::vector<llvm::Type *> elements = { b_.getInt64Ty(), // af_type
+                                           ArrayType::get(b_.getInt8Ty(), 16) }; // the union in struct
     StructType *inet_struct = b_.GetStructType("inet_t", elements, false);
 
     AllocaInst *buf = b_.CreateAllocaBPF(inet_struct, "inet");
 
+    // af_offset = inet -> af_type
     Value *af_offset = b_.CreateGEP(inet_struct,
                                     buf,
                                     { b_.getInt64(0), b_.getInt32(0) });
     Value *af_type;
 
     auto inet = call.vargs->at(0);
+    // provide default value for af_type
     if (call.vargs->size() == 1)
     {
       if (inet->type.IsIntegerTy() || inet->type.GetSize() == 4)
@@ -762,13 +774,16 @@ void CodegenLLVM::visit(Call &call)
       auto scoped_del = accept(call.vargs->at(0));
       af_type = b_.CreateIntCast(expr_, b_.getInt64Ty(), true);
     }
+    // write af_type to af_offset
     b_.CreateStore(af_type, af_offset);
 
     Value *inet_offset = b_.CreateGEP(inet_struct,
                                       buf,
                                       { b_.getInt32(0), b_.getInt32(1) });
+    // to init with zeros
     b_.CREATE_MEMSET(inet_offset, b_.getInt8(0), 16, 1);
 
+    // move to next arg
     auto scoped_del = accept(inet);
     if (inet->type.IsArrayTy() || inet->type.IsStringTy())
     {
@@ -786,7 +801,107 @@ void CodegenLLVM::visit(Call &call)
                                           b_.getInt32Ty()->getPointerTo()));
     }
 
+    // setting current expression value to the inet instance
     expr_ = buf;
+    expr_deleter_ = [this, buf]() { b_.CreateLifetimeEnd(buf); };
+  }
+  else if (call.func == "pton")
+  {
+    // union {
+    //   char[4] inet4;
+    //   char[16] inet6;
+    // }
+    llvm::Type *array_t = ArrayType::get(b_.getInt8Ty(), 16); // the union in struct
+
+    AllocaInst *buf = b_.CreateAllocaBPF(array_t, "in_addr");
+
+
+    auto in_addr_str = bpftrace_.get_string_literal(call.vargs->at(0));
+    std::cout << "raw arg " << in_addr_str << "\n";
+
+    const char *in_addr_char = in_addr_str.c_str();
+    char dst[16];
+    auto ret = inet_pton(AF_INET6, in_addr_char, &dst);
+    std::cout << "pton ret " << ret << " str " << in_addr_str << " char " << in_addr_char << "\n";
+
+    // print char array
+    std::cout << "0x";
+    for (int i = 0; i < 16; i++) {
+      std::cout << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(dst[i]);
+      if ((i +1) % 2 == 0) {
+        std::cout << ":";
+      }
+    }
+    std::cout << "\n";
+
+    Value *in_addr;
+//    in_addr = b_.getInt8(dst[0]);
+//    b_.CreateStore(in_addr,
+//                   b_.CreateGEP(array_t,
+//                                buf,
+//                                { b_.getInt64(0), b_.getInt64(0) }));
+//    Value *in_addr2;
+//    in_addr2 = b_.getInt8(dst[1]);
+//    b_.CreateStore(in_addr2,
+//                   b_.CreateGEP(array_t,
+//                                buf,
+//                                { b_.getInt64(0), b_.getInt64(1) }));
+//    Value *in_addr15;
+//    in_addr15 = b_.getInt8(dst[14]);
+//    b_.CreateStore(in_addr15,
+//                   b_.CreateGEP(array_t,
+//                                buf,
+//                                { b_.getInt64(0), b_.getInt64(14) }));
+//    in_addr15 = b_.getInt8(dst[15]);
+//    b_.CreateStore(in_addr15,
+//                   b_.CreateGEP(array_t,
+//                                buf,
+//                                { b_.getInt64(0), b_.getInt64(15) }));
+
+    // FIXME, should use the method like the buf above
+    for (int i = 0; i < 16; i++) {
+      in_addr = b_.getInt8(dst[i]);
+      b_.CreateStore(in_addr,
+                     b_.CreateGEP(array_t,
+                                  buf,
+                                  { b_.getInt64(0), b_.getInt64(i) }));
+    }
+
+
+//    b_.CREATE_MEMCPY(dst, in_addr, in_addr->GetSize(), 1);
+//    b_.CREATE_MEMCPY(dst, in_addr, 16, 1);
+//    b_.CreateStore(in_addr, buf);
+//
+//    llvm::Type *array = ArrayType::get(b_.getInt8Ty(), 16); // the union in struct
+//
+//    auto elements = AsyncEvent::CgroupPath().asLLVMType(b_);
+//    StructType *cgroup_path_struct = b_.GetStructType(call.func + "_t",
+//                                                      elements,
+//                                                      true);
+//    AllocaInst *buf = b_.CreateAllocaBPF(cgroup_path_struct,
+//                                         call.func + "_args");
+//
+//    // Store cgroup path event id
+//    b_.CreateStore(b_.GetIntSameSize(cgroup_path_id_, elements.at(0)),
+//                   b_.CreateGEP(cgroup_path_struct,
+//                                buf,
+//                                { b_.getInt64(0), b_.getInt32(0) }));
+
+
+//
+////    Value *in_addr;
+////    in_addr = b_.getInt64(dst);
+////    b_.CREATE_MEMCPY(dst, in_addr, in_addr->GetSize(), 1);
+////    b_.CreateStore(in_addr, buf);
+////    expr_ = buf;
+//
+////    expr_ = b_.CreateIntCast(dst, b_.getInt64Ty(), false);
+//
+////    Value *in_addr;
+////    in_addr = b_.getInt64(dst);
+////    b_.CreateStore(in_addr, buf);
+    expr_ = buf;
+
     expr_deleter_ = [this, buf]() { b_.CreateLifetimeEnd(buf); };
   }
   else if (call.func == "reg")
@@ -1202,10 +1317,44 @@ void CodegenLLVM::binop_buf(Binop &binop)
 
   auto scoped_del_left = accept(binop.left);
   Value *left_string = expr_;
+  std::cout << "buf left " << binop.left->type << " size " << binop.left->type.GetSize() << "\n";
+  std::cout << "buf right " << binop.right->type << " size " << binop.right->type.GetSize() << "\n";
 
   size_t len = std::min(binop.left->type.GetSize(),
                         binop.right->type.GetSize());
+  std::cout << "buf compare length " << len << "\n";
   expr_ = b_.CreateStrncmp(left_string, right_string, len, inverse);
+}
+
+void CodegenLLVM::binop_array(Binop &binop)
+{
+  if (binop.op != Operator::EQ && binop.op != Operator::NE)
+  {
+    LOG(FATAL) << "missing codegen to array operator \"" << opstr(binop)
+               << "\"";
+  }
+
+  std::string string_literal("");
+
+  // strcmp returns 0 when strings are equal
+  bool inverse = binop.op == Operator::EQ;
+
+  auto scoped_del_right = accept(binop.right);
+  Value *right_string = expr_;
+
+  auto scoped_del_left = accept(binop.left);
+  Value *left_string = expr_;
+
+  std::cout << "left " << binop.left->type << " size " << binop.left->type.GetSize() << "\n";
+  std::cout << "right " << binop.right->type << " size " << binop.right->type.GetSize() << "\n";
+  // FIXME
+  // being cut to len of 10
+
+  size_t len = std::min(binop.left->type.GetSize(),
+                        binop.right->type.GetSize());
+  // FIXME mock
+//  expr_ = b_.CreateStrncmp(left_string, right_string, len, inverse);
+    expr_ = b_.getTrue();
 }
 
 void CodegenLLVM::binop_int(Binop &binop)
@@ -1415,6 +1564,10 @@ void CodegenLLVM::visit(Binop &binop)
   else if (type.IsBufferTy())
   {
     binop_buf(binop);
+  }
+  else if (type.IsArrayTy())
+  {
+    binop_array(binop);
   }
   else
   {

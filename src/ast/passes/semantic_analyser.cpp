@@ -764,6 +764,7 @@ void SemanticAnalyser::visit(Call &call)
     }
 
     buffer_size++; // extra byte is used to embed the length of the buffer
+    std::cout << "buf created buff by size " << buffer_size << "\n";
     call.type = CreateBuffer(buffer_size);
     // Consider case : $a = buf("hi", 2); $b = buf("bye", 3);  $a == $b
     // The result of buf is copied to bpf stack. Hence kernel probe read
@@ -818,6 +819,30 @@ void SemanticAnalyser::visit(Call &call)
           << call.func << "() argument must be 4 or 16 bytes in size";
 
     call.type = CreateInet(buffer_size);
+  }
+  else if (call.func == "pton") {
+    // Kind of:
+    //
+    // struct {
+    //   int af_type;
+    //   union {
+    //     char[4] inet4;
+    //     char[16] inet6;
+    //   }
+//    // }
+//    int buffer_size = 24;
+//    auto type = arg->type;
+//
+//    if ((arg->type.IsArrayTy() || arg->type.IsStringTy()) &&
+//        type.GetSize() != 4 && type.GetSize() != 16)
+//      LOG(ERROR, call.loc, err_)
+//          << call.func << "() argument must be 4 or 16 bytes in size";
+//
+//    call.type = CreateInet(buffer_size);
+//    call.type = SizedType(Type::array, 16);
+//    SizedType CreateArray(size_t num_elements, const SizedType &element_type)
+    auto elem_type = CreateUInt8();
+    call.type = CreateArray(16, elem_type);
   }
   else if (call.func == "join") {
     check_assignment(call, false, false, false);
