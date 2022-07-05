@@ -790,6 +790,54 @@ void CodegenLLVM::visit(Call &call)
     expr_ = buf;
     expr_deleter_ = [this, buf]() { b_.CreateLifetimeEnd(buf); };
   }
+  else if (call.func == "pton")
+  {
+    Expression *addr;
+    auto af_type = AF_INET;
+    int addr_size = 4;
+
+    if (call.vargs->size() == 2) {
+      addr = call.vargs->at(1);
+      auto af_type_val = bpftrace_.get_int_literal(call.vargs->at(0));
+      if (af_type_val.has_value() && *af_type_val == AF_INET6) {
+        af_type = AF_INET6;
+        addr_size = 16;
+      }
+    } else {
+      addr = call.vargs->at(0);
+    }
+
+    llvm::Type *array_t = ArrayType::get(b_.getInt8Ty(), addr_size);
+    AllocaInst *buf;
+    if (af_type == AF_INET6) {
+      buf = b_.CreateAllocaBPF(array_t, "addr6");
+    } else {
+      buf = b_.CreateAllocaBPF(array_t, "addr4");
+    }
+
+    auto addr_str = bpftrace_.get_string_literal(addr);
+    char dst[addr_size];
+    Value *octet;
+
+    auto ret = inet_pton(af_type, addr_str.c_str(), &dst);
+    if (ret != 1) {
+      LOG(FATAL) << "inet_pton() call returns "<< ret;
+    }
+
+    for (int i = 0; i < addr_size; i++) {
+      octet = b_.getInt8(dst[i]);
+      b_.CreateStore(octet,
+                     b_.CreateGEP(array_t,
+                                  buf,
+                                  { b_.getInt64(0), b_.getInt64(i) }));
+    }
+
+    // FIXME
+    // here we have a PointerType but when binop compare it becomes a integer type
+    expr_ = buf;
+    // FIXME why we call LifeTimeEnd here
+    expr_deleter_ = [this, buf]() { b_.CreateLifetimeEnd(buf); };
+  }
   else if (call.func == "reg")
   {
     auto reg_name = bpftrace_.get_string_literal(call.vargs->at(0));
@@ -1176,7 +1224,12 @@ void CodegenLLVM::visit(Variable &var)
   }
   else
   {
+    // p var_alloca->getType()
+    //$7 = (llvm::PointerType *) 0xf81fe0
     auto *var_alloca = variables_[var.ident];
+    // p var_alloca->getType()->getPointerElementType()->getTypeID()
+    //$9 = llvm::Type::IntegerTyID
+    // FIXME so the problem might be here, we should not store *interger at variables_[var.ident]
     expr_ = b_.CreateLoad(var_alloca->getType()->getPointerElementType(),
                           var_alloca);
   }
@@ -1194,6 +1247,8 @@ std::pair<Value *, uint64_t> CodegenLLVM::getString(Expression *expr)
   else
   {
     auto scoped_del = accept(expr);
+    // (gdb) p result.first->getType()->getTypeID()
+    // $3 = llvm::Type::IntegerTyID
     result.first = expr_;
     result.second = expr->type.GetSize();
     expr_deleter_ = scoped_del.disarm();
@@ -1219,6 +1274,29 @@ void CodegenLLVM::binop_string(Binop &binop)
 
   size_t len = std::min(left_string.second, right_string.second);
   expr_ = b_.CreateStrncmp(left_string.first, right_string.first, len, inverse);
+}
+
+void CodegenLLVM::binop_array(Binop &binop)
+{
+  if (binop.op != Operator::EQ && binop.op != Operator::NE)
+  {
+    LOG(FATAL) << "missing codegen to string operator \"" << opstr(binop)
+               << "\"";
+  }
+
+  std::string string_literal;
+
+  // strcmp returns 0 when strings are equal
+  bool inverse = binop.op == Operator::EQ;
+
+  // FIXME dont use getString
+  auto left_array_ptr = getString(binop.left);
+  auto right_array_ptr = getString(binop.right);
+
+  size_t len = std::min(left_array_ptr.second, right_array_ptr.second);
+
+  expr_ = b_.CreateArrayNCmpV3(left_array_ptr.first, right_array_ptr.first, len, inverse);
+//  expr_ = b_.CreateArrayNCmpTest(left_array_ptr.first, right_array_ptr.first, len, inverse);
 }
 
 void CodegenLLVM::binop_buf(Binop &binop)
@@ -1452,6 +1530,11 @@ void CodegenLLVM::visit(Binop &binop)
   else if (type.IsBufferTy())
   {
     binop_buf(binop);
+  }
+  else if (type.IsArrayTy())
+  {
+//    binop_string(binop);
+    binop_array(binop);
   }
   else
   {
@@ -1784,14 +1867,22 @@ void CodegenLLVM::visit(FieldAccess &acc)
   }
 }
 
+// FIXME we can copy from this function
 void CodegenLLVM::visit(ArrayAccess &arr)
 {
+  // bpftrace::Type::array
   SizedType &type = arr.expr->type;
+  // bpftrace::Type::integer
   auto elem_type = type.IsArrayTy() ? *type.GetElementTy()
                                     : *type.GetPointeeTy();
+  // 1
   size_t elem_size = elem_type.GetSize();
 
   auto scoped_del_expr = accept(arr.expr);
+  // p expr_->getType()->getTypeID()
+  // $10 = llvm::Type::IntegerTyID
+  // p array->getType()->getTypeID()
+  // $13 = llvm::Type::IntegerTyID
   Value *array = expr_;
 
   auto scoped_del_index = accept(arr.indexpr);
@@ -1800,9 +1891,12 @@ void CodegenLLVM::visit(ArrayAccess &arr)
     readDatastructElemFromStack(array, expr_, type, elem_type, scoped_del_expr);
   else
   {
+    // we're not a pointerTy
     if (array->getType()->isPointerTy())
       array = b_.CreatePtrToInt(array, b_.getInt64Ty());
 
+    // here we are
+    // expr is offset
     Value *index = b_.CreateIntCast(expr_, b_.getInt64Ty(), type.IsSigned());
     Value *offset = b_.CreateMul(index, b_.getInt64(elem_size));
 
@@ -1980,6 +2074,7 @@ void CodegenLLVM::visit(AssignMapStatement &assignment)
     b_.CreateLifetimeEnd(val);
 }
 
+// STEP 1: visit assignment, assign array as pointer
 void CodegenLLVM::visit(AssignVarStatement &assignment)
 {
   Variable &var = *assignment.var;
@@ -1995,17 +2090,23 @@ void CodegenLLVM::visit(AssignVarStatement &assignment)
     // the pointer and do the memcpy/proberead later when necessary
     if (var.type.IsArrayTy() || var.type.IsRecordTy())
     {
+      // FIXME
+      // why when var.type is array, the pointee_type become integer
       auto &pointee_type = var.type.IsArrayTy() ? *var.type.GetElementTy()
                                                 : var.type;
       alloca_type = CreatePointer(pointee_type, var.type.GetAS());
     }
 
     AllocaInst *val = b_.CreateAllocaBPFInit(alloca_type, var.ident);
+    //  FIXME here we store the *integer
+    // p val->getType()->getPointerElementType()->getTypeID()
+    //$15 = llvm::Type::IntegerTyID
     variables_[var.ident] = val;
   }
 
   if (var.type.IsArrayTy() || var.type.IsRecordTy())
   {
+    // we store only the pointer, thus we use *integer
     // For arrays and structs, only the pointer is stored
     b_.CreateStore(b_.CreatePtrToInt(expr_, b_.getInt64Ty()),
                    variables_[var.ident]);
@@ -3382,6 +3483,7 @@ void CodegenLLVM::probereadDatastructElem(Value *src_data,
     }
     else
     {
+      // here we are
       AllocaInst *dst = b_.CreateAllocaBPF(elem_type, temp_name);
       b_.CreateProbeRead(
           ctx_, dst, elem_type.GetSize(), src, data_type.GetAS(), loc);

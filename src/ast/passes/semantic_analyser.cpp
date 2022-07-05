@@ -1,4 +1,5 @@
 #include "semantic_analyser.h"
+#include <arpa/inet.h>
 
 #include <algorithm>
 #include <cstring>
@@ -654,7 +655,8 @@ void SemanticAnalyser::visit(Call &call)
     if (check_varargs(call, 1, 2)) {
       auto *arg = call.vargs->at(0);
       auto &t = arg->type;
-      if (!t.IsIntegerTy() && !t.IsPtrTy())
+      // TODO allow str call on array
+      if (!t.IsIntegerTy() && !t.IsPtrTy() && !t.IsArrayTy())
       {
         LOG(ERROR, call.loc, err_)
             << call.func << "() expects an integer or a pointer type as first "
@@ -816,6 +818,35 @@ void SemanticAnalyser::visit(Call &call)
           << call.func << "() argument must be 4 or 16 bytes in size";
 
     call.type = CreateInet(buffer_size);
+  }
+  else if (call.func == "pton") {
+    if (!check_varargs(call, 1, 2))
+      return;
+
+    auto arg = call.vargs->at(0);
+    auto af_type = AF_INET;
+    if (call.vargs->size() == 2) {
+      check_arg(call, Type::integer, 0);
+      auto af_type_val = bpftrace_.get_int_literal(arg);
+      if (af_type_val.has_value()) {
+        af_type = *af_type_val;
+      }
+      arg = call.vargs->at(1);
+    }
+
+    if (!arg->type.IsStringTy()) {
+      LOG(ERROR, call.loc, err_)
+          << call.func << "() expects an string argument, got "
+          << arg->type.type;
+      return;
+    }
+
+    auto elem_type = CreateUInt8();
+    if (af_type == AF_INET6) {
+      call.type = CreateArray(16, elem_type);
+    } else {
+      call.type = CreateArray(4, elem_type);
+    }
   }
   else if (call.func == "join") {
     check_assignment(call, false, false, false);

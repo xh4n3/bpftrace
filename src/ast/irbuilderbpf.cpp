@@ -498,6 +498,31 @@ void IRBuilderBPF::CreateProbeRead(Value *ctx,
   CreateHelperErrorCond(ctx, call, read_fn, loc);
 }
 
+void IRBuilderBPF::CreateProbeRead(Value *ctx,
+                                   Value *dst,
+                                   llvm::Value *size,
+                                   Value *src,
+                                   AddrSpace as)
+{
+  assert(size && size->getType()->getIntegerBitWidth() <= 32);
+  size = CreateIntCast(size, getInt32Ty(), false);
+
+  // int bpf_probe_read(void *dst, int size, void *src)
+  // Return: 0 on success or negative error
+
+  auto read_fn = selectProbeReadHelper(as, false);
+
+  FunctionType *proberead_func_type = FunctionType::get(
+      getInt64Ty(), { dst->getType(), getInt32Ty(), src->getType() }, false);
+  PointerType *proberead_func_ptr_type = PointerType::get(proberead_func_type, 0);
+  Constant *proberead_func = ConstantExpr::getCast(Instruction::IntToPtr,
+                                                   getInt64(read_fn),
+                                                   proberead_func_ptr_type);
+  CallInst *call = createCall(proberead_func,
+                              { dst, size, src },
+                              probeReadHelperName(read_fn));
+}
+
 Constant *IRBuilderBPF::createProbeReadStrFn(llvm::Type *dst,
                                              llvm::Type *src,
                                              AddrSpace as)
@@ -863,6 +888,289 @@ CallInst *IRBuilderBPF::CreateGetNs(bool boot_time)
                                                  getInt64(fn),
                                                  gettime_func_ptr_type);
   return createCall(gettime_func, {}, "get_ns");
+}
+
+Value *IRBuilderBPF::CreateArrayNCmpTest(Value *val1,
+                                         Value *val2,
+                                         uint64_t n,
+                                         bool inverse)
+{
+  auto elem_type = getInt8Ty();
+  size_t elem_size = 1;
+
+  AllocaInst *l = CreateAllocaBPF(elem_type, "ll");
+
+  Value *index, *offset, *val1_src, *val2_src;
+  Value *ll, *rr;
+
+  // print ll's offset + 1
+  val1_src = val1;
+  index = getInt64(1);
+  offset = CreateMul(index, getInt64(elem_size));
+  val1_src = CreateAdd(val1, offset);
+  CreateProbeRead(
+      val1, l, getInt32(1), val1_src, AddrSpace::kernel);
+  ll = CreateLoad(elem_type, l);
+
+  // print rr's offset + 1
+  AllocaInst *r = CreateAllocaBPF(elem_type, "rr");
+  val2_src = val2;
+  val2_src = CreateAdd(val2, offset);
+  CreateProbeRead(
+      val2, r, getInt32(1), val2_src, AddrSpace::kernel);
+  rr = CreateLoad(elem_type, r);
+
+  // print ll's offset + 2
+  offset = CreateMul(index, getInt64(elem_size));
+  val1_src = CreateAdd(val1_src, offset);
+  CreateProbeRead(
+      val1, l, getInt32(1), val1_src, AddrSpace::kernel);
+  ll = CreateLoad(elem_type, l);
+
+  return ll;
+  // FIXME this is printable, print 0/1 for now
+  //  return getInt64(8);
+}
+
+
+// FIXME CreateArrayNCmpV1 has a bug, it stop compare bytes when it meets null byte
+// should remove the cmp_null check
+Value *IRBuilderBPF::CreateArrayNCmpV1(Value *val1,
+                                     Value *val2,
+                                     uint64_t n,
+                                     bool inverse)
+{
+  auto elem_type = getInt8Ty();
+  size_t elem_size = 1;
+
+  AllocaInst *l = CreateAllocaBPF(elem_type, "ll");
+  AllocaInst *r = CreateAllocaBPF(elem_type, "rr");
+
+  // FIXME use probereadDatastructElem
+  Function *parent = GetInsertBlock()->getParent();
+  AllocaInst *store = CreateAllocaBPF(getInt1Ty(), "strcmp.result");
+  BasicBlock *str_ne = BasicBlock::Create(module_.getContext(),
+                                          "strcmp.false",
+                                          parent);
+  BasicBlock *done = BasicBlock::Create(module_.getContext(),
+                                        "strcmp.done",
+                                        parent);
+
+  // FIXME when bin_op == EQ, inverse == 1, !inverse == 0
+  CreateStore(getInt1(!inverse), store);
+
+  Value *null_byte = getInt8(0);
+  Value *index, *offset, *val1_src, *val2_src;
+  Value *ll, *rr;
+
+  Value *one = getInt32(1);
+
+  val1_src = val1;
+  val2_src = val2;
+
+    for (size_t i = 0; i < n; i++)
+    {
+      BasicBlock *char_eq = BasicBlock::Create(module_.getContext(),
+                                               "strcmp.loop",
+                                               parent);
+          BasicBlock *loop_null_check = BasicBlock::Create(module_.getContext(),
+                                                           "strcmp.loop_null_cmp",
+                                                           parent);
+
+      index = getInt64(i);
+      offset = CreateMul(index, getInt64(elem_size));
+
+      val1_src = CreateAdd(val1_src, offset);
+      val2_src = CreateAdd(val2_src, offset);
+      // FIXME do not need to be copied
+      CreateProbeRead(
+          val1, l, getInt32(1), val1_src, AddrSpace::kernel);
+      ll = CreateLoad(elem_type, l);
+
+      CreateProbeRead(
+          val2, r, getInt32(1), val2_src, AddrSpace::none);
+      rr = CreateLoad(elem_type, r);
+
+      Value *cmp = CreateICmpNE(ll, rr, "strcmp.cmp");
+          CreateCondBr(cmp, str_ne, loop_null_check);
+
+          SetInsertPoint(loop_null_check);
+          Value *cmp_null = CreateICmpEQ(ll, null_byte, "strcmp.cmp_null");
+          CreateCondBr(cmp_null, done, char_eq);
+
+      SetInsertPoint(char_eq);
+    }
+
+  CreateBr(done);
+  SetInsertPoint(done);
+  // inverse == 1, return
+  CreateStore(getInt1(inverse), store);
+
+  CreateBr(str_ne);
+  SetInsertPoint(str_ne);
+
+  // store is a pointer to bool (i1 *)
+  Value *result = CreateLoad(getInt1Ty(), store);
+  CreateLifetimeEnd(store);
+  result = CreateIntCast(result, getInt64Ty(), false);
+
+  return result;
+}
+
+// FIXME change this to workable, this also have a bug, that always return 0, i.e. Not Equal
+Value *IRBuilderBPF::CreateArrayNCmpV2(Value *val1,
+                                     Value *val2,
+                                     uint64_t n,
+                                     bool inverse)
+{
+  auto elem_type = getInt8Ty();
+  size_t elem_size = 1;
+
+  AllocaInst *l = CreateAllocaBPF(elem_type, "ll");
+  AllocaInst *r = CreateAllocaBPF(elem_type, "rr");
+
+  // FIXME use probereadDatastructElem
+  Function *parent = GetInsertBlock()->getParent();
+  AllocaInst *store = CreateAllocaBPF(getInt1Ty(), "strcmp.result");
+  BasicBlock *str_ne = BasicBlock::Create(module_.getContext(),
+                                          "strcmp.false",
+                                          parent);
+  BasicBlock *done = BasicBlock::Create(module_.getContext(),
+                                        "strcmp.done",
+                                        parent);
+
+  // FIXME when bin_op == EQ, inverse == 1, !inverse == 0
+  CreateStore(getInt1(!inverse), store);
+
+  Value *null_byte = getInt8(0);
+  Value *index, *offset, *val1_src, *val2_src;
+  Value *ll, *rr;
+
+  Value *one = getInt32(1);
+
+  val1_src = val1;
+  val2_src = val2;
+
+  for (size_t i = 0; i < n; i++)
+  {
+    BasicBlock *char_eq = BasicBlock::Create(module_.getContext(),
+                                             "strcmp.loop",
+                                             parent);
+    //    BasicBlock *loop_null_check = BasicBlock::Create(module_.getContext(),
+    //                                                     "strcmp.loop_null_cmp",
+    //                                                     parent);
+
+    index = getInt64(i);
+    offset = CreateMul(index, getInt64(elem_size));
+
+    val1_src = CreateAdd(val1_src, offset);
+    val2_src = CreateAdd(val2_src, offset);
+    // FIXME do not need to be copied
+    CreateProbeRead(
+        val1, l, getInt32(1), val1_src, AddrSpace::kernel);
+    ll = CreateLoad(elem_type, l);
+
+    CreateProbeRead(
+        val2, r, getInt32(1), val2_src, AddrSpace::none);
+    rr = CreateLoad(elem_type, r);
+
+    Value *cmp = CreateICmpNE(ll, rr, "strcmp.cmp");
+    //    CreateCondBr(cmp, str_ne, loop_null_check);
+    CreateCondBr(cmp, str_ne, char_eq);
+
+    //    SetInsertPoint(loop_null_check);
+
+    //    Value *cmp_null = CreateICmpEQ(ll, null_byte, "strcmp.cmp_null");
+    //    CreateCondBr(cmp_null, done, char_eq);
+
+    SetInsertPoint(char_eq);
+  }
+
+  CreateBr(done);
+  SetInsertPoint(done);
+  // FIXME this done section was never called, so the result is always not EQ
+  // inverse == 1, return
+  CreateStore(getInt1(inverse), store);
+
+  CreateBr(str_ne);
+  SetInsertPoint(str_ne);
+
+  // store is a pointer to bool (i1 *)
+  Value *result = CreateLoad(getInt1Ty(), store);
+  CreateLifetimeEnd(store);
+  result = CreateIntCast(result, getInt64Ty(), false);
+
+  return result;
+}
+
+// FIXME test func
+Value *IRBuilderBPF::CreateArrayNCmpV3(Value *val1,
+                                       Value *val2,
+                                       uint64_t n,
+                                       bool inverse)
+{
+  auto elem_type = getInt8Ty();
+  size_t elem_size = 1;
+
+  AllocaInst *l = CreateAllocaBPF(elem_type, "ll");
+  AllocaInst *r = CreateAllocaBPF(elem_type, "rr");
+
+  // FIXME use probereadDatastructElem
+  Function *parent = GetInsertBlock()->getParent();
+  AllocaInst *store = CreateAllocaBPF(getInt1Ty(), "strcmp.result");
+  BasicBlock *str_ne = BasicBlock::Create(module_.getContext(),
+                                          "strcmp.false",
+                                          parent);
+  BasicBlock *done = BasicBlock::Create(module_.getContext(),
+                                        "strcmp.done",
+                                        parent);
+
+  // FIXME when bin_op == EQ, inverse == 1, !inverse == 0
+  CreateStore(getInt1(!inverse), store);
+
+  Value *null_byte = getInt8(0);
+  Value *index, *offset, *val1_src, *val2_src;
+  Value *ll, *rr;
+
+  Value *one = getInt32(1);
+
+  val1_src = val1;
+  val2_src = val2;
+
+  for (size_t i = 0; i < n; i++)
+  {
+    index = getInt64(i);
+    offset = CreateMul(index, getInt64(elem_size));
+
+    val1_src = CreateAdd(val1_src, offset);
+    val2_src = CreateAdd(val2_src, offset);
+    // FIXME do not need to be copied
+    CreateProbeRead(
+        val1, l, getInt32(1), val1_src, AddrSpace::kernel);
+    ll = CreateLoad(elem_type, l);
+
+    CreateProbeRead(
+        val2, r, getInt32(1), val2_src, AddrSpace::none);
+    rr = CreateLoad(elem_type, r);
+
+    Value *cmp = CreateICmpNE(ll, rr, "strcmp.cmp");
+    CreateCondBr(cmp, str_ne, done);
+  }
+
+  CreateBr(done);
+  SetInsertPoint(done);
+  // inverse == 1, return
+  CreateStore(getInt1(inverse), store);
+
+  CreateBr(str_ne);
+  SetInsertPoint(str_ne);
+
+  // store is a pointer to bool (i1 *)
+  Value *result = CreateLoad(getInt1Ty(), store);
+  CreateLifetimeEnd(store);
+  result = CreateIntCast(result, getInt64Ty(), false);
+
+  return result;
 }
 
 CallInst *IRBuilderBPF::CreateGetPidTgid()

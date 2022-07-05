@@ -89,6 +89,11 @@ public:
                        Value *src,
                        AddrSpace as,
                        const location &loc);
+  void CreateProbeRead(Value *ctx,
+                       Value *dst,
+                       llvm::Value *size,
+                       Value *src,
+                       AddrSpace as);
   CallInst *CreateProbeReadStr(Value *ctx,
                                AllocaInst *dst,
                                llvm::Value *size,
@@ -116,6 +121,10 @@ public:
                                 AddrSpace as,
                                 const location &loc);
   Value *CreateStrncmp(Value *val1, Value *val2, uint64_t n, bool inverse);
+  Value *CreateArrayNCmpV1(Value *val1, Value *val2, uint64_t n, bool inverse);
+  Value *CreateArrayNCmpV2(Value *val1, Value *val2, uint64_t n, bool inverse);
+  Value *CreateArrayNCmpV3(Value *val1, Value *val2, uint64_t n, bool inverse);
+  Value *CreateArrayNCmpTest(Value *val1, Value *val2, uint64_t n, bool inverse);
   CallInst *CreateGetNs(bool boot_time);
   CallInst   *CreateGetPidTgid();
   CallInst   *CreateGetCurrentCgroupId();
