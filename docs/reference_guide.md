@@ -99,6 +99,7 @@ discussion to other files in /docs, the /tools/\*\_examples.txt files, or blog p
     - [29. `cgroup_path()`: Convert cgroup id to cgroup path](#29-cgroup_path-convert-cgroup-id-to-cgroup-path)
     - [30. `bswap`: Reverse byte order](#30-bswap-reverse-byte-order)
     - [31. `skb_output`: Write `skb` 's data section into a PCAP file](#31-skb_output-write-skb-s-data-section-into-a-pcap-file)
+    - [32. `pton()`: Convert text IP address to byte array](#32-pton-convert-text-ip-address-to-byte-array)
 - [Map Functions](#map-functions)
     - [1. Builtins](#1-builtins-2)
     - [2. `count()`: Count](#2-count-count)
@@ -2919,12 +2920,13 @@ limit the number of bytes that are read. By default, the maximum number of bytes
 be tuned using the [`BPFTRACE_STRLEN`](#91-bpftrace_strlen) environment variable.
 
 Bytes with values >=32 and <=126 are printed using their ASCII character, other
-bytes are printed in hex form (e.g. `\x00`).
+bytes are printed in hex form (e.g. `\x00`). The `%rx` format specifier can be used to print
+everything in hex form, including ASCII characters.
 
 For example, we can take the `buff` parameter (`void *`) of `sys_enter_sendto`, read the
 number of bytes specified by `len` (`size_t`), and format the bytes in hexadecimal so that
 they don't corrupt the terminal display. The resulting string can be provided as an argument to
-printf() using the `%r` format specifier:
+printf() using the `%r` or `%rx` format specifier.
 
 ```
 # bpftrace -e 'tracepoint:syscalls:sys_enter_sendto
