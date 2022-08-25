@@ -217,7 +217,7 @@ class Runner(object):
                 'test': test.name,
                 '__BPFTRACE_NOTIFY_PROBES_ATTACHED': '1',
                 '__BPFTRACE_NOTIFY_AOT_PORTABILITY_DISABLED': '1',
-                'BPFTRACE_VERIFY_LLVM_IR': '1',
+                'BPFTRACE_VERIFY_LLVM_IR': '0',
             }
             env.update(test.env)
             p = subprocess.Popen(
