@@ -12,6 +12,8 @@ and this project adheres to
 - Support for 32-bit ARM systems
   - [#2360](https://github.com/iovisor/bpftrace/pull/2360)
 #### Changed
+- Support comparison for integer arrays
+  - [#2387](https://github.com/iovisor/bpftrace/pull/2387)
 #### Deprecated
 #### Removed
 #### Fixed
