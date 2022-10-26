@@ -131,6 +131,13 @@ public:
                        uint64_t str2_size,
                        uint64_t n,
                        bool inverse);
+  Value *CreateIntegerArrayCmp(Value *ctx,
+                               Value *val1,
+                               Value *val2,
+                               const SizedType &val1_type,
+                               const SizedType &val2_type,
+                               const bool inverse,
+                               const location &loc);
   CallInst *CreateGetNs(bool boot_time, const location &loc);
   CallInst *CreateGetPidTgid(const location &loc);
   CallInst *CreateGetCurrentCgroupId(const location &loc);
