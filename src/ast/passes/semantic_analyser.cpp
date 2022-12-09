@@ -1699,7 +1699,7 @@ void SemanticAnalyser::binop_array(Binop &binop)
         << "Only arrays of same size support comparison operators.";
   }
 
-  if (!lht.GetElementTy()->IsIntegerTy() || lht != rht) {
+  if (!lht.GetElementTy()->IsIntegerTy() || lht != rht)
   {
     LOG(ERROR, binop.loc, err_)
         << "Only arrays of same sized integer support comparison operators.";
