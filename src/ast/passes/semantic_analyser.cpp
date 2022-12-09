@@ -1693,19 +1693,13 @@ void SemanticAnalyser::binop_array(Binop &binop)
         << "The " << opstr(binop) << " operator cannot be used on arrays.";
   }
 
-  if (!lht.GetElementTy()->IsIntegerTy() || !rht.GetElementTy()->IsIntegerTy())
-  {
-    LOG(ERROR, binop.loc, err_)
-        << "Only arrays of integer support comparison operators.";
-  }
-
   if (lht.GetNumElements() != rht.GetNumElements())
   {
     LOG(ERROR, binop.loc, err_)
         << "Only arrays of same size support comparison operators.";
   }
 
-  if (lht.GetElementTy()->GetSize() != rht.GetElementTy()->GetSize())
+  if (!lht.GetElementTy()->IsIntegerTy() || lht != rht) {
   {
     LOG(ERROR, binop.loc, err_)
         << "Only arrays of same sized integer support comparison operators.";
