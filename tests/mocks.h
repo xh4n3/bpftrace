@@ -89,6 +89,11 @@ public:
     return feature_->has_loop();
   }
 
+  bool has_map_ringbuf(void)
+  {
+    return feature_->has_map_ringbuf();
+  }
+
   MockProbeMatcher *mock_probe_matcher;
 };
 
@@ -113,6 +118,7 @@ public:
     has_ktime_get_boot_ns_ = std::make_optional<bool>(has_features);
     has_kprobe_multi_ = std::make_optional<bool>(has_features);
     has_skb_output_ = std::make_optional<bool>(has_features);
+    has_map_ringbuf_ = std::make_optional<bool>(has_features);
   };
   bool has_features_;
 };
