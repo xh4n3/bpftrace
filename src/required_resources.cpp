@@ -100,9 +100,20 @@ int RequiredResources::create_maps_impl(BPFtrace &bpftrace, bool fake)
     bpftrace.maps.Set(MapManager::Type::MappedPrintfData, std::move(map));
   }
   {
-    auto map = std::make_unique<T>(libbpf::BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    failed_maps += is_invalid_map(map->mapfd_);
-    bpftrace.maps.Set(MapManager::Type::PerfEvent, std::move(map));
+    if (bpftrace.feature_->has_map_ringbuf())
+    {
+      auto map = std::make_unique<T>(libbpf::BPF_MAP_TYPE_RINGBUF,
+                                     bpftrace.perf_rb_pages_);
+      failed_maps += is_invalid_map(map->mapfd_);
+      bpftrace.maps.Set(MapManager::Type::Ringbuf, std::move(map));
+    }
+    else
+    {
+      auto map = std::make_unique<T>(libbpf::BPF_MAP_TYPE_PERF_EVENT_ARRAY,
+                                     bpftrace.perf_rb_pages_);
+      failed_maps += is_invalid_map(map->mapfd_);
+      bpftrace.maps.Set(MapManager::Type::PerfEvent, std::move(map));
+    }
   }
 
   if (failed_maps > 0)

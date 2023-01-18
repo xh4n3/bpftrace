@@ -139,16 +139,29 @@ Map::Map(const SizedType &type) : IMap(type)
   }
 }
 
-Map::Map(libbpf::bpf_map_type map_type) : IMap(map_type)
+Map::Map(libbpf::bpf_map_type map_type, uint64_t perf_rb_pages) : IMap(map_type)
 {
-  std::vector<int> cpus = get_online_cpus();
-  int key_size = 4;
-  int value_size = 4;
-  int max_entries = cpus.size();
-  int flags = 0;
+  if (map_type == libbpf::BPF_MAP_TYPE_RINGBUF)
+  {
+    int key_size = 0;
+    int value_size = 0;
+    int max_entries = perf_rb_pages * 4096;
+    int flags = 0;
 
-  mapfd_ = create_map(
-      map_type, "printf", key_size, value_size, max_entries, flags);
+    mapfd_ = create_map(
+        map_type, "printf", key_size, value_size, max_entries, flags);
+  }
+  else
+  {
+    std::vector<int> cpus = get_online_cpus();
+    int key_size = 4;
+    int value_size = 4;
+    int max_entries = cpus.size();
+    int flags = 0;
+
+    mapfd_ = create_map(
+        map_type, "printf", key_size, value_size, max_entries, flags);
+  }
   if (mapfd_ < 0)
   {
     LOG(ERROR) << "failed to create " << name_ << " map: " << strerror(errno);
@@ -262,6 +275,8 @@ std::string to_string(MapManager::Type t)
       return "elapsed";
     case MapManager::Type::MappedPrintfData:
       return "mapped_printf_data";
+    case MapManager::Type::Ringbuf:
+      return "ringbuf";
   }
   return {}; // unreached
 }

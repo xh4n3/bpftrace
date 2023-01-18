@@ -171,6 +171,13 @@ public:
                        ArrayRef<Value *> args,
                        const Twine &Name);
   void        CreateGetCurrentComm(Value *ctx, AllocaInst *buf, size_t size, const location& loc);
+  void CreateOutput(Value *ctx,
+                    Value *data,
+                    size_t size,
+                    const location *loc = nullptr);
+  void CreateRingbufOutput(Value *data,
+                           size_t size,
+                           const location *loc = nullptr);
   void CreatePerfEventOutput(Value *ctx,
                              Value *data,
                              size_t size,
