@@ -61,6 +61,7 @@ public:
     Join,
     Elapsed,
     MappedPrintfData,
+    Ringbuf,
   };
 
   void Set(Type t, std::unique_ptr<IMap> map);
