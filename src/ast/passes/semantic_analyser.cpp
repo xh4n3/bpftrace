@@ -959,7 +959,8 @@ void SemanticAnalyser::visit(Call &call)
   else if (call.func == "printf" || call.func == "system" ||
            call.func == "cat" || call.func == "debugf")
   {
-    check_assignment(call, false, false, false);
+//    check_assignment(call, false, false, false);
+    check_assignment(call, false, true, false);
     if (check_varargs(call, 1, 128))
     {
       check_arg(call, Type::string, 0, true);
@@ -1005,7 +1006,7 @@ void SemanticAnalyser::visit(Call &call)
              "more information see bpf_trace_printk in bpf-helpers(7).";
     }
 
-    call.type = CreateNone();
+    call.type = CreateInt32();
   }
   else if (call.func == "exit") {
     check_assignment(call, false, false, false);

@@ -1336,7 +1336,7 @@ void IRBuilderBPF::CreateGetCurrentComm(Value *ctx,
   CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_get_current_comm, loc);
 }
 
-void IRBuilderBPF::CreateOutput(Value *ctx,
+CallInst *IRBuilderBPF::CreateOutput(Value *ctx,
                                 Value *data,
                                 size_t size,
                                 const location *loc)
@@ -1346,15 +1346,15 @@ void IRBuilderBPF::CreateOutput(Value *ctx,
 
   if (bpftrace_.feature_->has_map_ringbuf())
   {
-    CreateRingbufOutput(data, size, loc);
+    return CreateRingbufOutput(data, size, loc);
   }
   else
   {
-    CreatePerfEventOutput(ctx, data, size, loc);
+    return CreatePerfEventOutput(ctx, data, size, loc);
   }
 }
 
-void IRBuilderBPF::CreateRingbufOutput(Value *data,
+CallInst *IRBuilderBPF::CreateRingbufOutput(Value *data,
                                        size_t size,
                                        const location *loc)
 {
@@ -1367,14 +1367,14 @@ void IRBuilderBPF::CreateRingbufOutput(Value *data,
       { map_ptr->getType(), data->getType(), getInt64Ty(), getInt64Ty() },
       false);
 
-  CreateHelperCall(libbpf::BPF_FUNC_ringbuf_output,
+  return CreateHelperCall(libbpf::BPF_FUNC_ringbuf_output,
                    ringbuf_output_func_type,
                    { map_ptr, data, getInt64(size), getInt64(0) },
                    "ringbuf_output",
                    loc);
 }
 
-void IRBuilderBPF::CreatePerfEventOutput(Value *ctx,
+CallInst *IRBuilderBPF::CreatePerfEventOutput(Value *ctx,
                                          Value *data,
                                          size_t size,
                                          const location *loc)
@@ -1394,14 +1394,14 @@ void IRBuilderBPF::CreatePerfEventOutput(Value *ctx,
                                                            data->getType(),
                                                            getInt64Ty() },
                                                          false);
-  CreateHelperCall(libbpf::BPF_FUNC_perf_event_output,
+  return CreateHelperCall(libbpf::BPF_FUNC_perf_event_output,
                    perfoutput_func_type,
                    { ctx, map_ptr, flags_val, data, size_val },
                    "perf_event_output",
                    loc);
 }
 
-void IRBuilderBPF::CreateTracePrintk(Value *fmt_ptr,
+CallInst *IRBuilderBPF::CreateTracePrintk(Value *fmt_ptr,
                                      Value *fmt_size,
                                      const std::vector<Value *> &values,
                                      const location &loc)
@@ -1416,7 +1416,7 @@ void IRBuilderBPF::CreateTracePrintk(Value *fmt_ptr,
   FunctionType *traceprintk_func_type = FunctionType::get(
       getInt64Ty(), { getInt8PtrTy(), getInt32Ty() }, true);
 
-  CreateHelperCall(libbpf::BPF_FUNC_trace_printk,
+  return CreateHelperCall(libbpf::BPF_FUNC_trace_printk,
                    traceprintk_func_type,
                    args,
                    "trace_printk",
@@ -1661,7 +1661,7 @@ void IRBuilderBPF::CreatePath(Value *ctx,
   CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_d_path, loc);
 }
 
-void IRBuilderBPF::CreateSeqPrintf(Value *ctx,
+CallInst *IRBuilderBPF::CreateSeqPrintf(Value *ctx,
                                    Value *fmt,
                                    Value *fmt_size,
                                    Value *data,
@@ -1700,6 +1700,7 @@ void IRBuilderBPF::CreateSeqPrintf(Value *ctx,
                               { seq, fmt, fmt_size, data, data_len },
                               "seq_printf");
   CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_seq_printf, loc);
+  return call;
 }
 
 StoreInst *IRBuilderBPF::createAlignedStore(Value *val,

@@ -171,18 +171,18 @@ public:
                        ArrayRef<Value *> args,
                        const Twine &Name);
   void        CreateGetCurrentComm(Value *ctx, AllocaInst *buf, size_t size, const location& loc);
-  void CreateOutput(Value *ctx,
+  CallInst *CreateOutput(Value *ctx,
                     Value *data,
                     size_t size,
                     const location *loc = nullptr);
-  void CreateRingbufOutput(Value *data,
+  CallInst * CreateRingbufOutput(Value *data,
                            size_t size,
                            const location *loc = nullptr);
-  void CreatePerfEventOutput(Value *ctx,
+  CallInst * CreatePerfEventOutput(Value *ctx,
                              Value *data,
                              size_t size,
                              const location *loc = nullptr);
-  void CreateTracePrintk(Value *fmt,
+  CallInst *CreateTracePrintk(Value *fmt,
                          Value *fmt_size,
                          const std::vector<Value *> &values,
                          const location &loc);
@@ -203,7 +203,7 @@ public:
                   AllocaInst *buf,
                   Value *path,
                   const location &loc);
-  void CreateSeqPrintf(Value *ctx,
+  CallInst *CreateSeqPrintf(Value *ctx,
                        Value *fmt,
                        Value *fmt_size,
                        Value *data,

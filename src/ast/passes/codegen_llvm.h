@@ -66,7 +66,7 @@ public:
   void DumpIR(void);
   void DumpIR(std::ostream &out);
   void DumpIR(const std::string filename);
-  void createFormatStringCall(Call &call, int &id, CallArgs &call_args,
+  Value *createFormatStringCall(Call &call, int &id, CallArgs &call_args,
                               const std::string &call_name, AsyncAction async_action);
 
   void createPrintMapCall(Call &call);

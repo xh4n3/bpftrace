@@ -926,7 +926,7 @@ void CodegenLLVM::visit(Call &call)
       Value *fmt = b_.CreateAdd(map_data, b_.getInt64(idx));
 
       // and finally the seq_printf call
-      b_.CreateSeqPrintf(ctx_,
+      expr_ = b_.CreateSeqPrintf(ctx_,
                          b_.CreateIntToPtr(fmt, b_.getInt8PtrTy()),
                          b_.getInt32(size),
                          b_.CreatePointerCast(data, b_.getInt8PtrTy()),
@@ -937,7 +937,7 @@ void CodegenLLVM::visit(Call &call)
     }
     else
     {
-      createFormatStringCall(call,
+      expr_ = createFormatStringCall(call,
                              printf_id_,
                              bpftrace_.resources.printf_args,
                              "printf",
@@ -963,24 +963,27 @@ void CodegenLLVM::visit(Call &call)
       values.push_back(expr_);
     }
 
-    b_.CreateTracePrintk(b_.CreateIntToPtr(fmt, b_.getInt8PtrTy()),
+    Value *ret = b_.CreateTracePrintk(b_.CreateIntToPtr(fmt, b_.getInt8PtrTy()),
                          b_.getInt32(size),
                          values,
                          call.loc);
+    expr_= ret;
     mapped_printf_id_++;
   }
   else if (call.func == "system")
   {
-    createFormatStringCall(call,
+    Value *ret = createFormatStringCall(call,
                            system_id_,
                            bpftrace_.resources.system_args,
                            "system",
                            AsyncAction::syscall);
+    expr_= ret;
   }
   else if (call.func == "cat")
   {
-    createFormatStringCall(
+    Value *ret = createFormatStringCall(
         call, cat_id_, bpftrace_.resources.cat_args, "cat", AsyncAction::cat);
+    expr_ = ret;
   }
   else if (call.func == "exit")
   {
@@ -3061,7 +3064,7 @@ MDNode *CodegenLLVM::createLoopMetadata()
   return loopid;
 }
 
-void CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_args,
+Value *CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_args,
                                          const std::string &call_name, AsyncAction async_action)
 {
   /*
@@ -3115,9 +3118,9 @@ void CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_arg
   }
 
   id++;
-  b_.CreateOutput(ctx_, fmt_args, struct_size, &call.loc);
+  Value *ret = b_.CreateOutput(ctx_, fmt_args, struct_size, &call.loc);
   b_.CreateLifetimeEnd(fmt_args);
-  expr_ = nullptr;
+  return ret;
 }
 
 void CodegenLLVM::generateWatchpointSetupProbe(
