@@ -1367,11 +1367,62 @@ void IRBuilderBPF::CreateRingbufOutput(Value *data,
       { map_ptr->getType(), data->getType(), getInt64Ty(), getInt64Ty() },
       false);
 
-  CreateHelperCall(libbpf::BPF_FUNC_ringbuf_output,
+  Value *ret = CreateHelperCall(libbpf::BPF_FUNC_ringbuf_output,
                    ringbuf_output_func_type,
                    { map_ptr, data, getInt64(size), getInt64(0) },
                    "ringbuf_output",
                    loc);
+  Function *parent = GetInsertBlock()->getParent();
+  BasicBlock *event_loss_block = BasicBlock::Create(module_.getContext(),
+                                                    "event_loss_counter",
+                                                    parent);
+  BasicBlock *merge_block = BasicBlock::Create(module_.getContext(),
+                                               "counter_merge",
+                                               parent);
+  Value *condition = CreateICmpSLT(ret, getInt64(0), "if_negative");
+  CreateCondBr(condition, event_loss_block, merge_block);
+  SetInsertPoint(event_loss_block);
+  CreateAtomicIncCounter(bpftrace_.maps[MapManager::Type::RingbufLossCounter].value()->id, 0);
+  CreateBr(merge_block);
+  SetInsertPoint(merge_block);
+}
+
+void IRBuilderBPF::CreateAtomicIncCounter(int mapid, uint32_t idx)
+{
+  AllocaInst *key = CreateAllocaBPF(getInt32Ty(), "key");
+  CreateStore(getInt32(idx), key);
+
+  CallInst *call = createMapLookup(mapid, key);
+  Function *parent = GetInsertBlock()->getParent();
+  BasicBlock *lookup_success_block = BasicBlock::Create(module_.getContext(),
+                                                        "lookup_success",
+                                                        parent);
+  BasicBlock *lookup_failure_block = BasicBlock::Create(module_.getContext(),
+                                                        "lookup_failure",
+                                                        parent);
+  BasicBlock *lookup_merge_block = BasicBlock::Create(module_.getContext(),
+                                                      "lookup_merge",
+                                                      parent);
+
+  Value *condition = CreateICmpNE(
+      CreateIntCast(call, getInt8PtrTy(), true),
+      ConstantExpr::getCast(Instruction::IntToPtr, getInt64(0), getInt8PtrTy()),
+      "map_lookup_cond");
+  CreateCondBr(condition, lookup_success_block, lookup_failure_block);
+
+  SetInsertPoint(lookup_success_block);
+  CreateAtomicRMW(AtomicRMWInst::BinOp::Add,
+                  call,
+                  getInt64(1),
+                  AtomicOrdering::SequentiallyConsistent);
+  CreateBr(lookup_merge_block);
+
+  SetInsertPoint(lookup_failure_block);
+  // ignore lookup failure
+  CreateBr(lookup_merge_block);
+
+  SetInsertPoint(lookup_merge_block);
+  CreateLifetimeEnd(key);
 }
 
 void IRBuilderBPF::CreatePerfEventOutput(Value *ctx,

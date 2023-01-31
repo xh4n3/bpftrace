@@ -178,6 +178,7 @@ public:
   void CreateRingbufOutput(Value *data,
                            size_t size,
                            const location *loc = nullptr);
+  void CreateAtomicIncCounter(int mapfd, uint32_t idx);
   void CreatePerfEventOutput(Value *ctx,
                              Value *data,
                              size_t size,

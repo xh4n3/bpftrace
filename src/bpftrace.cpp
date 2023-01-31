@@ -1156,6 +1156,10 @@ int BPFtrace::run(BpfBytecode bytecode)
   if (err)
     return err;
 
+  if (feature_->has_map_ringbuf()) {
+    init_ringbuf_loss_counter();
+  }
+
   if (maps.Has(MapManager::Type::Elapsed))
   {
     struct timespec ts;
@@ -1269,7 +1273,30 @@ int BPFtrace::run(BpfBytecode bytecode)
 
   teardown_output();
 
+  if (feature_->has_map_ringbuf()) {
+    print_ringbuf_loss_counter();
+  }
+
   return 0;
+}
+
+void BPFtrace::init_ringbuf_loss_counter()
+{
+  if (bpf_update_elem(maps[MapManager::Type::RingbufLossCounter].value()->mapfd_, &ringbuf_loss_counter_key_, &ringbuf_loss_counter_value_, 0)) {
+    LOG(ERROR) << "fail to initilize ringbuf loss counter";
+  }
+}
+
+void BPFtrace::print_ringbuf_loss_counter()
+{
+  uint64_t value = 0;
+  if (bpf_lookup_elem(maps[MapManager::Type::RingbufLossCounter].value()->mapfd_, &ringbuf_loss_counter_key_, &value)) {
+    LOG(ERROR) << "fail to get event loss counter";
+    return;
+  }
+  if (value) {
+    out_->lost_events(value);
+  }
 }
 
 int BPFtrace::setup_output()

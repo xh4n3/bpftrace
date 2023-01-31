@@ -62,6 +62,7 @@ public:
     Elapsed,
     MappedPrintfData,
     Ringbuf,
+    RingbufLossCounter,
   };
 
   void Set(Type t, std::unique_ptr<IMap> map);

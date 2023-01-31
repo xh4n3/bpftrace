@@ -187,6 +187,8 @@ public:
   uint64_t log_size_ = 1000000;
   uint64_t perf_rb_pages_ = 64;
   uint64_t max_type_res_iterations = 0;
+  uint32_t ringbuf_loss_counter_key_ = 0;
+  uint64_t ringbuf_loss_counter_value_ = 0;
   bool demangle_cpp_symbols_ = true;
   bool resolve_user_symbols_ = true;
   bool cache_user_symbols_ = true;
@@ -231,6 +233,8 @@ private:
       std::tuple<uint8_t *, uintptr_t> func,
       int pid,
       bool file_activation);
+  void init_ringbuf_loss_counter();
+  void print_ringbuf_loss_counter();
   int setup_output();
   int setup_perf_events();
   int setup_ringbuf();
