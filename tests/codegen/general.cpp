@@ -45,6 +45,11 @@ public:
   {
     return feature_->has_loop();
   }
+
+  bool has_map_ringbuf(void)
+  {
+    return feature_->has_map_ringbuf();
+  }
 };
 
 TEST(codegen, populate_sections)
