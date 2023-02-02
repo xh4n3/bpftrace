@@ -1336,14 +1336,49 @@ void IRBuilderBPF::CreateGetCurrentComm(Value *ctx,
   CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_get_current_comm, loc);
 }
 
+void IRBuilderBPF::CreateOutput(Value *ctx,
+                                Value *data,
+                                size_t size,
+                                const location *loc)
+{
+  assert(ctx && ctx->getType() == getInt8PtrTy());
+  assert(data && data->getType()->isPointerTy());
+
+  if (bpftrace_.feature_->has_map_ringbuf())
+  {
+    CreateRingbufOutput(data, size, loc);
+  }
+  else
+  {
+    CreatePerfEventOutput(ctx, data, size, loc);
+  }
+}
+
+void IRBuilderBPF::CreateRingbufOutput(Value *data,
+                                       size_t size,
+                                       const location *loc)
+{
+  Value *map_ptr = CreateBpfPseudoCallId(
+      bpftrace_.maps[MapManager::Type::Ringbuf].value()->id);
+
+  // long bpf_ringbuf_output(void *ringbuf, void *data, u64 size, u64 flags)
+  FunctionType *ringbuf_output_func_type = FunctionType::get(
+      getInt64Ty(),
+      { map_ptr->getType(), data->getType(), getInt64Ty(), getInt64Ty() },
+      false);
+
+  CreateHelperCall(libbpf::BPF_FUNC_ringbuf_output,
+                   ringbuf_output_func_type,
+                   { map_ptr, data, getInt64(size), getInt64(0) },
+                   "ringbuf_output",
+                   loc);
+}
+
 void IRBuilderBPF::CreatePerfEventOutput(Value *ctx,
                                          Value *data,
                                          size_t size,
                                          const location *loc)
 {
-  assert(ctx && ctx->getType() == getInt8PtrTy());
-  assert(data && data->getType()->isPointerTy());
-
   Value *map_ptr = CreateBpfPseudoCallId(
       bpftrace_.maps[MapManager::Type::PerfEvent].value()->id);
 
@@ -1569,7 +1604,7 @@ void IRBuilderBPF::CreateHelperError(Value *ctx,
 
   auto &layout = module_.getDataLayout();
   auto struct_size = layout.getTypeAllocSize(helper_error_struct);
-  CreatePerfEventOutput(ctx, buf, struct_size, &loc);
+  CreateOutput(ctx, buf, struct_size, &loc);
   CreateLifetimeEnd(buf);
 }
 
