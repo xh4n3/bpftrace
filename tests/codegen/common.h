@@ -94,6 +94,22 @@ static void test(const std::string &input,
   test(*bpftrace, input, name);
 }
 
+static void test(const std::string &input,
+                 const std::string &name,
+                 const std::vector<std::string> variations,
+                 bool safe_mode = true)
+{
+  auto bpftrace = get_mock_bpftrace();
+  bpftrace->safe_mode_ = safe_mode;
+  std::string name_with_variations = name;
+  for (size_t i = 0; i < variations.size(); i++)
+  {
+    name_with_variations.append("_");
+    name_with_variations.append(variations.at(i));
+  }
+  test(*bpftrace, input, name_with_variations);
+}
+
 } // namespace codegen
 } // namespace test
 } // namespace bpftrace

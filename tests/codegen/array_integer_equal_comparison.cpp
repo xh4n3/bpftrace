@@ -6,10 +6,12 @@ namespace codegen {
 
 TEST(codegen, array_integer_equal_comparison)
 {
+  std::vector<std::string> variations;
+
   auto bpftrace = get_mock_bpftrace();
   if (bpftrace->has_loop())
   {
-    return;
+    variations.push_back("no_unroll");
   }
 
   test("struct Foo { int arr[4]; }"
@@ -23,7 +25,8 @@ TEST(codegen, array_integer_equal_comparison)
        "  }"
        "}",
 
-       NAME);
+       NAME,
+       variations);
 }
 
 } // namespace codegen
