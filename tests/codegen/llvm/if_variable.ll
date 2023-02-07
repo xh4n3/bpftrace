@@ -37,7 +37,7 @@ if_end:                                           ; preds = %if_body, %entry
   %9 = getelementptr %printf_t, %printf_t* %printf_args, i32 0, i32 1
   store i64 %8, i64* %9, align 8
   %pseudo = call i64 @llvm.bpf.pseudo(i64 1, i64 0)
-  %perf_event_output = call i64 inttoptr (i64 25 to i64 (i8*, i64, i64, %printf_t*, i64)*)(i8* %0, i64 %pseudo, i64 4294967295, %printf_t* %printf_args, i64 16)
+  %ringbuf_output = call i64 inttoptr (i64 130 to i64 (i64, %printf_t*, i64, i64)*)(i64 %pseudo, %printf_t* %printf_args, i64 16, i64 0)
   %10 = bitcast %printf_t* %printf_args to i8*
   call void @llvm.lifetime.end.p0i8(i64 -1, i8* %10)
   ret i64 0
