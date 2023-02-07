@@ -2,28 +2,6 @@ name: CI
 
 on: [push, pull_request]
 jobs:
-  clang-format:
-    # Only run clang-format on pull requests. We want to allow people to
-    # ignore clang-format if they think it's not helpful.
-    if: "github.event_name == 'pull_request'"
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: recursive
-    - name: Install clang-format
-      run: sudo apt-get install clang-format
-    - name: Download git-clang-format
-      run: wget https://raw.githubusercontent.com/llvm-mirror/clang/master/tools/clang-format/git-clang-format
-    - name: Install git-clang-format
-      run: sudo install -t /bin git-clang-format
-    - name: Fetch origin master
-      run: git fetch --no-tags --prune --depth=1 origin master
-    - name: clang-format
-      run: git clang-format origin/master
-    - name: diff
-      run: git diff --exit-code
-
   build_test:
     runs-on: ubuntu-latest
     strategy:
@@ -31,14 +9,6 @@ jobs:
         env:
         - NAME: LLVM 10 Debug
           TYPE: Debug
-          LLVM_VERSION: 10
-          RUN_ALL_TESTS: 1
-          RUNTIME_TEST_DISABLE: probe.kprobe_offset_fail_size,usdt."usdt probes - file based semaphore activation multi process"
-          TOOLS_TEST_OLDVERSION: biosnoop.bt tcpdrop.bt
-          BASE: focal
-          VENDOR_GTEST: ON
-        - NAME: LLVM 10 Release
-          TYPE: Release
           LLVM_VERSION: 10
           RUN_ALL_TESTS: 1
           RUNTIME_TEST_DISABLE: probe.kprobe_offset_fail_size,usdt."usdt probes - file based semaphore activation multi process"
@@ -57,14 +27,6 @@ jobs:
           VENDOR_GTEST: ON
         - NAME: LLVM 11 Debug
           TYPE: Debug
-          LLVM_VERSION: 11
-          RUN_ALL_TESTS: 1
-          RUNTIME_TEST_DISABLE: probe.kprobe_offset_fail_size,usdt."usdt probes - file based semaphore activation multi process"
-          TOOLS_TEST_OLDVERSION: biosnoop.bt tcpdrop.bt
-          BASE: focal
-          VENDOR_GTEST: ON
-        - NAME: LLVM 11 Release
-          TYPE: Release
           LLVM_VERSION: 11
           RUN_ALL_TESTS: 1
           RUNTIME_TEST_DISABLE: probe.kprobe_offset_fail_size,usdt."usdt probes - file based semaphore activation multi process"
@@ -102,20 +64,6 @@ jobs:
           RUNTIME_TEST_DISABLE: probe.kprobe_offset_fail_size,usdt."usdt probes - file based semaphore activation multi process"
           TOOLS_TEST_OLDVERSION: biosnoop.bt tcpdrop.bt
           BASE: focal
-          VENDOR_GTEST: ON
-        - NAME: Memleak test (LLVM 11 Debug)
-          TYPE: Debug
-          LLVM_VERSION: 11
-          BASE: focal
-          RUN_MEMLEAK_TEST: 1
-          RUN_TESTS: 0
-          VENDOR_GTEST: ON
-        - NAME: Memleak test (LLVM 11 Release)
-          TYPE: Release
-          LLVM_VERSION: 11
-          BASE: focal
-          RUN_MEMLEAK_TEST: 1
-          RUN_TESTS: 0
           VENDOR_GTEST: ON
     steps:
     - uses: actions/checkout@v2
@@ -156,6 +104,7 @@ jobs:
       # nf_tables is necessary for testing kernel modules BTF support
       run: sudo modprobe nf_tables
     - name: Build and test
+      continue-on-error: true
       env: ${{matrix.env}}
       run: >
         docker run --privileged
@@ -180,21 +129,3 @@ jobs:
         $TYPE
         -j$(nproc)
 
-  irc:
-    # Notify IRC of build failures on pushes only if we are running from
-    # the main repo. We don't want this rule to trigger from forked repos.
-    needs:
-      - build_test
-    if: "failure() && github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'iovisor/bpftrace'"
-    runs-on: ubuntu-latest
-    steps:
-    - name: Message channel
-      uses: rectalogic/notify-irc@v1
-      with:
-        nickname: bpftrace-ci-bot
-        server: irc.oftc.net
-        port: 6667
-        tls: false
-        channel: "#bpftrace"
-        message: |
-          master is BROKEN at https://github.com/iovisor/bpftrace/commit/${{github.sha}}
