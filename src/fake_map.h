@@ -13,7 +13,7 @@ public:
           int max_entries)
       : FakeMap(name, type, key, 0, 0, 0, max_entries){};
   FakeMap(const SizedType &type);
-  FakeMap(libbpf::bpf_map_type map_type);
+  FakeMap(libbpf::bpf_map_type map_type, uint64_t perf_rb_pages);
   FakeMap(const std::string &name,
           const SizedType &type,
           const MapKey &key,

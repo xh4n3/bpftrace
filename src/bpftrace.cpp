@@ -10,6 +10,7 @@
 #include <regex>
 #include <sstream>
 #include <sys/epoll.h>
+#include <thread>
 
 #include <fcntl.h>
 #include <signal.h>
@@ -601,6 +602,12 @@ void perf_event_printer(void *cb_cookie, void *data, int size)
                           false);
 }
 
+int ringbuf_printer(void *cb_cookie, void *data, size_t size)
+{
+  perf_event_printer(cb_cookie, data, size);
+  return 0;
+}
+
 std::vector<std::unique_ptr<IPrintable>> BPFtrace::get_arg_values(const std::vector<Field> &args, uint8_t* arg_data)
 {
   std::vector<std::unique_ptr<IPrintable>> arg_values;
@@ -1146,7 +1153,7 @@ int BPFtrace::run(BpfBytecode bytecode)
 
   bytecode_ = std::move(bytecode);
 
-  err = setup_perf_events();
+  err = setup_output();
   if (err)
     return err;
 
@@ -1247,7 +1254,7 @@ int BPFtrace::run(BpfBytecode bytecode)
   }
   else
   {
-    poll_perf_events();
+    poll_output();
   }
 
   attached_probes_.clear();
@@ -1259,12 +1266,22 @@ int BPFtrace::run(BpfBytecode bytecode)
   if (run_special_probe("END_trigger", bytecode_, END_trigger))
     return -1;
 
-  poll_perf_events(/* drain */ true);
+  poll_output(/* drain */ true);
 
-  // Calls perf_reader_free() on all open perf buffers.
-  open_perf_buffers_.clear();
+  teardown_output();
 
   return 0;
+}
+
+int BPFtrace::setup_output()
+{
+  if (feature_->has_map_ringbuf())
+  {
+    int err = setup_ringbuf();
+    if (err)
+      return err;
+  }
+  return setup_perf_events();
 }
 
 int BPFtrace::setup_perf_events()
@@ -1308,10 +1325,60 @@ int BPFtrace::setup_perf_events()
   return 0;
 }
 
+int BPFtrace::setup_ringbuf()
+{
+  ringbuf_ = static_cast<struct ring_buffer *>(bpf_new_ringbuf(
+      maps[MapManager::Type::Ringbuf].value()->mapfd_, ringbuf_printer, this));
+  // init ringbuf loss counter
+  if (bpf_update_elem(
+          maps[MapManager::Type::RingbufLossCounter].value()->mapfd_,
+          &rb_loss_cnt_key_,
+          &rb_loss_cnt_val_,
+          0))
+  {
+    LOG(ERROR) << "fail to init ringbuf loss counter";
+    return -1;
+  }
+  return 0;
+}
+
+void BPFtrace::teardown_output()
+{
+  if (feature_->has_map_ringbuf())
+  {
+    bpf_free_ringbuf(ringbuf_);
+    // print ringbuf event losses
+    uint64_t value = 0;
+    if (bpf_lookup_elem(
+            maps[MapManager::Type::RingbufLossCounter].value()->mapfd_,
+            &rb_loss_cnt_key_,
+            &value))
+    {
+      LOG(ERROR) << "fail to get ringbuf loss counter";
+    }
+    if (value)
+    {
+      out_->lost_events(value);
+    }
+  }
+  // Calls perf_reader_free() on all open perf buffers.
+  open_perf_buffers_.clear();
+}
+
+void BPFtrace::poll_output(bool drain)
+{
+  std::thread t;
+  if (feature_->has_map_ringbuf())
+    t = std::thread(&bpftrace::BPFtrace::poll_ringbuf, this, drain);
+
+  poll_perf_events(drain);
+
+  if (feature_->has_map_ringbuf())
+    t.join();
+}
+
 void BPFtrace::poll_perf_events(bool drain)
 {
-  const int timeout_ms = 100;
-
   if (epollfd_ < 0)
   {
     LOG(ERROR) << "Invalid epollfd " << epollfd_;
@@ -1339,6 +1406,43 @@ void BPFtrace::poll_perf_events(bool drain)
     for (int i=0; i<ready; i++)
     {
       perf_reader_event_read((perf_reader*)events[i].data.ptr);
+    }
+
+    // If we are tracing a specific pid and it has exited, we should exit
+    // as well b/c otherwise we'd be tracing nothing.
+    if ((procmon_ && !procmon_->is_alive()) || (child_ && !child_->is_alive()))
+    {
+      return;
+    }
+
+    // Print all maps if we received a SIGUSR1 signal
+    if (BPFtrace::sigusr1_recv)
+    {
+      BPFtrace::sigusr1_recv = false;
+      print_maps();
+    }
+  }
+  return;
+}
+
+void BPFtrace::poll_ringbuf(bool drain)
+{
+  while (true)
+  {
+    int ready = bpf_poll_ringbuf(ringbuf_, timeout_ms);
+    if (ready < 0 && !BPFtrace::exitsig_recv)
+    {
+      // We received an interrupt not caused by SIGINT, skip and run again
+      continue;
+    }
+
+    // Return if either
+    //   * exit signal is received
+    //   * There's no events left and we've been instructed to drain or
+    //     finalization has been requested through exit() builtin.
+    if (BPFtrace::exitsig_recv || (ready == 0 && (drain || finalize_)))
+    {
+      return;
     }
 
     // If we are tracing a specific pid and it has exited, we should exit

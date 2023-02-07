@@ -26,7 +26,7 @@ public:
       int max_entries,
       int flags);
   Map(const SizedType &type);
-  Map(libbpf::bpf_map_type map_type);
+  Map(libbpf::bpf_map_type map_type, uint64_t perf_rb_pages);
   virtual ~Map() override;
 };
 } // namespace bpftrace
