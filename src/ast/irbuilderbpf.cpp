@@ -1416,8 +1416,9 @@ void IRBuilderBPF::CreateAtomicIncCounter(int mapid, uint32_t idx)
   CreateCondBr(condition, lookup_success_block, lookup_failure_block);
 
   SetInsertPoint(lookup_success_block);
+  Value *val = CreatePointerCast(call, getInt64Ty()->getPointerTo());
   CREATE_ATOMIC_RMW(AtomicRMWInst::BinOp::Add,
-                    call,
+                    val,
                     getInt64(1),
                     1,
                     AtomicOrdering::SequentiallyConsistent);
