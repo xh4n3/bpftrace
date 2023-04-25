@@ -240,8 +240,7 @@ private:
   int setup_ringbuf();
   void teardown_output();
   void poll_output(bool drain = false);
-  void poll_perf_events(bool drain = false);
-  void poll_ringbuf(bool drain = false);
+  int poll_perf_events();
   int print_map_hist(IMap &map, uint32_t top, uint32_t div);
   int print_map_stats(IMap &map, uint32_t top, uint32_t div);
   static uint64_t read_address_from_output(std::string output);

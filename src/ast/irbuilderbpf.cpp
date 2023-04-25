@@ -423,13 +423,11 @@ Value *IRBuilderBPF::CreateMapLookupElem(Value *ctx,
 }
 
 void IRBuilderBPF::CreateMapUpdateElem(Value *ctx,
-                                       Map &map,
+                                       Value *map_ptr,
                                        Value *key,
                                        Value *val,
                                        const location &loc)
 {
-  Value *map_ptr = CreateBpfPseudoCallId(map);
-
   assert(ctx && ctx->getType() == getInt8PtrTy());
   assert(key->getType()->isPointerTy());
   assert(val->getType()->isPointerTy());
@@ -452,6 +450,27 @@ void IRBuilderBPF::CreateMapUpdateElem(Value *ctx,
                               { map_ptr, key, val, flags },
                               "update_elem");
   CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_map_update_elem, loc);
+}
+
+void IRBuilderBPF::CreateMapUpdateElem(Value *ctx,
+                                       int mapid,
+                                       Value *key,
+                                       Value *val,
+                                       const location &loc)
+{
+  Value *map_ptr = CreateBpfPseudoCallId(mapid);
+  CreateMapUpdateElem(ctx, map_ptr, key, val, loc);
+  return;
+}
+
+void IRBuilderBPF::CreateMapUpdateElem(Value *ctx,
+                                       Map &map,
+                                       Value *key,
+                                       Value *val,
+                                       const location &loc) {
+  Value *map_ptr = CreateBpfPseudoCallId(map);
+  CreateMapUpdateElem(ctx, map_ptr, key, val, loc);
+  return;
 }
 
 void IRBuilderBPF::CreateMapDeleteElem(Value *ctx,
@@ -1346,7 +1365,7 @@ void IRBuilderBPF::CreateOutput(Value *ctx,
 
   if (bpftrace_.feature_->has_map_ringbuf())
   {
-    CreateRingbufOutput(data, size, loc);
+    CreateRingbufOutput(ctx, data, size, loc);
   }
   else
   {
@@ -1354,7 +1373,8 @@ void IRBuilderBPF::CreateOutput(Value *ctx,
   }
 }
 
-void IRBuilderBPF::CreateRingbufOutput(Value *data,
+void IRBuilderBPF::CreateRingbufOutput(Value *ctx,
+                                       Value *data,
                                        size_t size,
                                        const location *loc)
 {
@@ -1384,9 +1404,25 @@ void IRBuilderBPF::CreateRingbufOutput(Value *data,
   CreateCondBr(condition, loss_block, merge_block);
 
   SetInsertPoint(loss_block);
+  if (true) {
+    AllocaInst *loss_key = CreateAllocaBPF(getInt32Ty(), "rb_loss_cnt_key");
+    CreateStore(getInt32(bpftrace_.rb_loss_cnt_key_), loss_key);
+    int map_id = bpftrace_.maps[MapManager::Type::RingbufLossCounter].value()->id;
+    SizedType val_type = CreateUInt64();
+    Value *old_val = CreateMapLookupElem(ctx,
+                                         map_id,
+                                         loss_key,
+                                         val_type,
+                                         *loc);
+    AllocaInst *new_val = CreateAllocaBPF(val_type, "rb_loss_cnt_val_new");
+    CreateStore(CreateAdd(old_val, getInt64(1)), new_val);
+    CreateMapUpdateElem(ctx, map_id, loss_key, new_val, *loc);
+
+  } else {
   CreateAtomicIncCounter(
       bpftrace_.maps[MapManager::Type::RingbufLossCounter].value()->id,
       bpftrace_.rb_loss_cnt_key_);
+  }
   CreateBr(merge_block);
 
   SetInsertPoint(merge_block);

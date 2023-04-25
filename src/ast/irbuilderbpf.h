@@ -83,6 +83,16 @@ public:
                            Value *key,
                            Value *val,
                            const location &loc);
+  void CreateMapUpdateElem(Value *ctx,
+                           int mapid,
+                           Value *key,
+                           Value *val,
+                           const location &loc);
+  void CreateMapUpdateElem(Value *ctx,
+                           Value *map_ptr,
+                           Value *key,
+                           Value *val,
+                           const location &loc);
   void CreateMapDeleteElem(Value *ctx,
                            Map &map,
                            Value *key,
@@ -183,7 +193,8 @@ public:
                     Value *data,
                     size_t size,
                     const location *loc = nullptr);
-  void CreateRingbufOutput(Value *data,
+  void CreateRingbufOutput(Value *ctx,
+                           Value *data,
                            size_t size,
                            const location *loc = nullptr);
   void CreateAtomicIncCounter(int mapfd, uint32_t idx);
