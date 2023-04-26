@@ -119,8 +119,12 @@ int RequiredResources::create_maps_impl(BPFtrace &bpftrace, bool fake)
     failed_maps += is_invalid_map(rb->mapfd_);
     bpftrace.maps.Set(MapManager::Type::Ringbuf, std::move(rb));
 
-    auto rb_loss_cnt = std::make_unique<T>(
-        "ringbuf_loss_counter", libbpf::BPF_MAP_TYPE_ARRAY, 4, 8, 1, 0);
+    auto rb_loss_cnt = std::make_unique<T>("ringbuf_loss_counter",
+                                           libbpf::BPF_MAP_TYPE_ARRAY,
+                                           sizeof(bpftrace.rb_loss_cnt_key_),
+                                           sizeof(bpftrace.rb_loss_cnt_val_),
+                                           1,
+                                           0);
     failed_maps += is_invalid_map(rb_loss_cnt->mapfd_);
     bpftrace.maps.Set(MapManager::Type::RingbufLossCounter,
                       std::move(rb_loss_cnt));

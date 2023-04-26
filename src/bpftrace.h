@@ -200,8 +200,8 @@ public:
   uint64_t ast_max_nodes_ = 0; // Maximum AST nodes allowed for fuzzing
   std::optional<StackMode> stack_mode_;
   std::optional<struct timespec> boottime_;
-  uint32_t rb_loss_cnt_key_ = 0;
-  uint64_t rb_loss_cnt_val_ = 0;
+  static constexpr uint32_t rb_loss_cnt_key_ = 0;
+  static constexpr uint64_t rb_loss_cnt_val_ = 0;
 
   static void sort_by_key(
       std::vector<SizedType> key_args,
@@ -242,8 +242,9 @@ private:
   int setup_ringbuf();
   void teardown_output();
   void poll_output(bool drain = false);
-  void poll_perf_events(bool drain = false);
-  void poll_ringbuf(bool drain = false);
+  int poll_perf_events();
+  void read_rb_loss_counter();
+  int reset_rb_loss_counter();
   int print_map_hist(IMap &map, uint32_t top, uint32_t div);
   int print_map_stats(IMap &map, uint32_t top, uint32_t div);
   static uint64_t read_address_from_output(std::string output);

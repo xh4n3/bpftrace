@@ -183,7 +183,7 @@ bool BPFfeature::detect_map(enum libbpf::bpf_map_type map_type)
       // default perf_rb_pages 64
       key_size = 0;
       value_size = 0;
-      max_entries = 4096 * 64;
+      max_entries = sysconf(_SC_PAGE_SIZE);
       break;
     default:
       break;
