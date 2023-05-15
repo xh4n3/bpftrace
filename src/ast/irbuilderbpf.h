@@ -183,14 +183,7 @@ public:
                     Value *data,
                     size_t size,
                     const location *loc = nullptr);
-  void CreateRingbufOutput(Value *data,
-                           size_t size,
-                           const location *loc = nullptr);
   void CreateAtomicIncCounter(int mapfd, uint32_t idx);
-  void CreatePerfEventOutput(Value *ctx,
-                             Value *data,
-                             size_t size,
-                             const location *loc = nullptr);
   void CreateTracePrintk(Value *fmt,
                          Value *fmt_size,
                          const std::vector<Value *> &values,
@@ -255,6 +248,13 @@ private:
 
   llvm::Type *getKernelPointerStorageTy();
   llvm::Type *getUserPointerStorageTy();
+  void CreateRingbufOutput(Value *data,
+                           size_t size,
+                           const location *loc = nullptr);
+  void CreatePerfEventOutput(Value *ctx,
+                             Value *data,
+                             size_t size,
+                             const location *loc = nullptr);
 
   std::map<std::string, StructType *> structs_;
 };

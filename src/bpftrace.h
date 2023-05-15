@@ -240,11 +240,22 @@ private:
   int setup_output();
   int setup_perf_events();
   int setup_ringbuf();
+  // when the ringbuf feature is available, enable ringbuf for built-ins like
+  // printf, cat.
+  bool is_ringbuf_enabled(void) const
+  {
+    return feature_->has_map_ringbuf();
+  }
+  // when the ringbuf feature is unavailable or built-in skboutput is used,
+  // enable perf_event
+  bool is_perf_event_enabled(void) const
+  {
+    return !feature_->has_map_ringbuf() || resources.needs_perf_event_map;
+  }
   void teardown_output();
   void poll_output(bool drain = false);
   int poll_perf_events();
-  void read_rb_loss_counter();
-  int reset_rb_loss_counter();
+  void handle_ringbuf_loss();
   int print_map_hist(IMap &map, uint32_t top, uint32_t div);
   int print_map_stats(IMap &map, uint32_t top, uint32_t div);
   static uint64_t read_address_from_output(std::string output);
@@ -252,6 +263,7 @@ private:
   bool has_iter_ = false;
   int epollfd_ = -1;
   struct ring_buffer *ringbuf_ = nullptr;
+  uint64_t ringbuf_loss_count = 0;
 
   std::unordered_map<std::string, std::unique_ptr<Dwarf>> dwarves_;
 };

@@ -1279,15 +1279,13 @@ int BPFtrace::run(BpfBytecode bytecode)
 
 int BPFtrace::setup_output()
 {
-  // when ringbuf is available, setup ringbuf for build-ins like printf, cat.
-  if (feature_->has_map_ringbuf())
+  if (is_ringbuf_enabled())
   {
     int err = setup_ringbuf();
     if (err)
       return err;
   }
-  // when ringbuf is unavailable or built-in skboutput is used, setup perf_event
-  if (!feature_->has_map_ringbuf() || resources.needs_perf_event_map)
+  if (is_perf_event_enabled())
   {
     return setup_perf_events();
   }
@@ -1339,7 +1337,11 @@ int BPFtrace::setup_ringbuf()
 {
   ringbuf_ = static_cast<struct ring_buffer *>(bpf_new_ringbuf(
       maps[MapManager::Type::Ringbuf].value()->mapfd_, ringbuf_printer, this));
-  if (reset_rb_loss_counter())
+  if (bpf_update_elem(
+          maps[MapManager::Type::RingbufLossCounter].value()->mapfd_,
+          const_cast<uint32_t *>(&rb_loss_cnt_key_),
+          const_cast<uint64_t *>(&rb_loss_cnt_val_),
+          0))
   {
     LOG(ERROR) << "fail to init ringbuf loss counter";
     return -1;
@@ -1349,10 +1351,10 @@ int BPFtrace::setup_ringbuf()
 
 void BPFtrace::teardown_output()
 {
-  if (feature_->has_map_ringbuf())
+  if (is_ringbuf_enabled())
     bpf_free_ringbuf(ringbuf_);
 
-  if (!feature_->has_map_ringbuf() || resources.needs_perf_event_map)
+  if (is_perf_event_enabled())
     // Calls perf_reader_free() on all open perf buffers.
     open_perf_buffers_.clear();
 }
@@ -1360,9 +1362,9 @@ void BPFtrace::teardown_output()
 void BPFtrace::poll_output(bool drain)
 {
   int ready;
-  bool do_poll_perf_event = !feature_->has_map_ringbuf() ||
-                            resources.needs_perf_event_map;
-  bool do_poll_ringbuf = feature_->has_map_ringbuf();
+  bool should_stop;
+  bool do_poll_perf_event = is_perf_event_enabled();
+  bool do_poll_ringbuf = is_ringbuf_enabled();
 
   if (do_poll_perf_event && epollfd_ < 0)
   {
@@ -1372,6 +1374,10 @@ void BPFtrace::poll_output(bool drain)
 
   while (true)
   {
+    // We've been instructed to drain or
+    // finalization has been requested through exit() builtin.
+    should_stop = drain || finalize_;
+
     if (do_poll_perf_event)
     {
       ready = poll_perf_events();
@@ -1381,11 +1387,10 @@ void BPFtrace::poll_output(bool drain)
         if (!do_poll_ringbuf)
           continue;
       }
-      if (ready < 0 || (ready == 0 && (drain || finalize_)))
+      if (ready < 0 || (ready == 0 && should_stop))
       // Stop if either
       //   * epoll_wait has encountered an error (eg signal delivery)
-      //   * There's no events left and we've been instructed to drain or
-      //     finalization has been requested through exit() builtin.
+      //   * no events left and we should stop
       {
         do_poll_perf_event = false;
       }
@@ -1394,19 +1399,18 @@ void BPFtrace::poll_output(bool drain)
     if (do_poll_ringbuf)
     {
       // print loss events
-      read_rb_loss_counter();
+      handle_ringbuf_loss();
       ready = bpf_poll_ringbuf(ringbuf_, timeout_ms);
       if (ready < 0 && !BPFtrace::exitsig_recv)
       {
-        // We received an interrupt not caused by SIGINT, skip and run again
+        // Some callbacks returned errors, skip and run again
         continue;
       }
-      if (BPFtrace::exitsig_recv || (ready == 0 && (drain || finalize_)))
+      if (BPFtrace::exitsig_recv || (ready == 0 && should_stop))
       {
         // Stop if either
         //   * exit signal is received
-        //   * There's no events left and we've been instructed to drain or
-        //     finalization has been requested through exit() builtin.
+        //   * no events left and we should stop
         do_poll_ringbuf = false;
       }
     }
@@ -1447,31 +1451,28 @@ int BPFtrace::poll_perf_events()
   return ready;
 }
 
-int BPFtrace::reset_rb_loss_counter()
+void BPFtrace::handle_ringbuf_loss()
 {
-  // reset ringbuf loss counter
-  return bpf_update_elem(
-      maps[MapManager::Type::RingbufLossCounter].value()->mapfd_,
-      const_cast<uint32_t *>(&rb_loss_cnt_key_),
-      const_cast<uint64_t *>(&rb_loss_cnt_val_),
-      0);
-}
-
-void BPFtrace::read_rb_loss_counter()
-{
-  uint64_t value = 0;
+  uint64_t current_value = 0;
   if (bpf_lookup_elem(
           maps[MapManager::Type::RingbufLossCounter].value()->mapfd_,
           const_cast<uint32_t *>(&rb_loss_cnt_key_),
-          &value))
+          &current_value))
   {
     LOG(ERROR) << "fail to get ringbuf loss counter";
   }
-  if (value)
+  if (current_value)
   {
-    if (reset_rb_loss_counter())
-      LOG(ERROR) << "fail to reset ringbuf loss counter";
-    out_->lost_events(value);
+    if (current_value > ringbuf_loss_count)
+    {
+      out_->lost_events(current_value - ringbuf_loss_count);
+      ringbuf_loss_count = current_value;
+    }
+    else if (current_value < ringbuf_loss_count)
+    {
+      LOG(ERROR) << "Invalid ringbuf loss count value: " << current_value
+                 << ", last seen: " << ringbuf_loss_count;
+    }
   }
 }
 
