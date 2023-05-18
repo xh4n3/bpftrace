@@ -263,7 +263,7 @@ private:
   bool has_iter_ = false;
   int epollfd_ = -1;
   struct ring_buffer *ringbuf_ = nullptr;
-  uint64_t ringbuf_loss_count = 0;
+  uint64_t ringbuf_loss_count_ = 0;
 
   std::unordered_map<std::string, std::unique_ptr<Dwarf>> dwarves_;
 };

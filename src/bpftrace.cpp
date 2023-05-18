@@ -25,6 +25,7 @@
 #include <bcc/bcc_syms.h>
 #include <bcc/perf_reader.h>
 #include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 
 #include "ast/async_event_types.h"
 #include "bpftrace.h"
@@ -1335,8 +1336,11 @@ int BPFtrace::setup_perf_events()
 
 int BPFtrace::setup_ringbuf()
 {
-  ringbuf_ = static_cast<struct ring_buffer *>(bpf_new_ringbuf(
-      maps[MapManager::Type::Ringbuf].value()->mapfd_, ringbuf_printer, this));
+  ringbuf_ = static_cast<struct ring_buffer *>(
+      ring_buffer__new(maps[MapManager::Type::Ringbuf].value()->mapfd_,
+                       ringbuf_printer,
+                       this,
+                       nullptr));
   if (bpf_update_elem(
           maps[MapManager::Type::RingbufLossCounter].value()->mapfd_,
           const_cast<uint32_t *>(&rb_loss_cnt_key_),
@@ -1352,7 +1356,7 @@ int BPFtrace::setup_ringbuf()
 void BPFtrace::teardown_output()
 {
   if (is_ringbuf_enabled())
-    bpf_free_ringbuf(ringbuf_);
+    ring_buffer__free(ringbuf_);
 
   if (is_perf_event_enabled())
     // Calls perf_reader_free() on all open perf buffers.
@@ -1362,9 +1366,24 @@ void BPFtrace::teardown_output()
 void BPFtrace::poll_output(bool drain)
 {
   int ready;
-  bool should_stop;
   bool do_poll_perf_event = is_perf_event_enabled();
   bool do_poll_ringbuf = is_ringbuf_enabled();
+  auto should_retry = [](int ready) {
+    // epoll_wait will set errno to EINTR if an interrupt received, it is
+    // retryable if not caused by SIGINT. ring_buffer__poll does not set errno,
+    // we will keep retrying till SIGINT.
+    return ready < 0 && (errno == 0 || errno == EINTR) &&
+           !BPFtrace::exitsig_recv;
+  };
+  auto should_stop = [this, drain](int ready) {
+    // Stop if either
+    //   * an exit signal is received
+    //   * epoll_wait has encountered an error (eg signal delivery)
+    //   * there's no events left and we've been instructed to drain or
+    //     finalization has been requested through exit() builtin.
+    return BPFtrace::exitsig_recv || ready < 0 ||
+           (ready == 0 && (drain || finalize_));
+  };
 
   if (do_poll_perf_event && epollfd_ < 0)
   {
@@ -1374,23 +1393,15 @@ void BPFtrace::poll_output(bool drain)
 
   while (true)
   {
-    // We've been instructed to drain or
-    // finalization has been requested through exit() builtin.
-    should_stop = drain || finalize_;
-
     if (do_poll_perf_event)
     {
       ready = poll_perf_events();
-      if (ready < 0 && errno == EINTR && !BPFtrace::exitsig_recv)
+      if (should_retry(ready))
       {
-        // We received an interrupt not caused by SIGINT, skip and run again
         if (!do_poll_ringbuf)
           continue;
       }
-      if (ready < 0 || (ready == 0 && should_stop))
-      // Stop if either
-      //   * epoll_wait has encountered an error (eg signal delivery)
-      //   * no events left and we should stop
+      if (should_stop(ready))
       {
         do_poll_perf_event = false;
       }
@@ -1400,17 +1411,13 @@ void BPFtrace::poll_output(bool drain)
     {
       // print loss events
       handle_ringbuf_loss();
-      ready = bpf_poll_ringbuf(ringbuf_, timeout_ms);
-      if (ready < 0 && !BPFtrace::exitsig_recv)
+      ready = ring_buffer__poll(ringbuf_, timeout_ms);
+      if (should_retry(ready))
       {
-        // Some callbacks returned errors, skip and run again
         continue;
       }
-      if (BPFtrace::exitsig_recv || (ready == 0 && should_stop))
+      if (should_stop(ready))
       {
-        // Stop if either
-        //   * exit signal is received
-        //   * no events left and we should stop
         do_poll_ringbuf = false;
       }
     }
@@ -1463,15 +1470,15 @@ void BPFtrace::handle_ringbuf_loss()
   }
   if (current_value)
   {
-    if (current_value > ringbuf_loss_count)
+    if (current_value > ringbuf_loss_count_)
     {
-      out_->lost_events(current_value - ringbuf_loss_count);
-      ringbuf_loss_count = current_value;
+      out_->lost_events(current_value - ringbuf_loss_count_);
+      ringbuf_loss_count_ = current_value;
     }
-    else if (current_value < ringbuf_loss_count)
+    else if (current_value < ringbuf_loss_count_)
     {
       LOG(ERROR) << "Invalid ringbuf loss count value: " << current_value
-                 << ", last seen: " << ringbuf_loss_count;
+                 << ", last seen: " << ringbuf_loss_count_;
     }
   }
 }
