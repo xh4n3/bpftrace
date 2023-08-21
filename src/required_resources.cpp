@@ -110,6 +110,11 @@ int RequiredResources::create_maps_impl(BPFtrace &bpftrace, bool fake)
     auto map = std::make_unique<T>(libbpf::BPF_MAP_TYPE_PERF_EVENT_ARRAY);
     failed_maps += is_invalid_map(map->mapfd_);
     bpftrace.maps.Set(MapManager::Type::PerfEvent, std::move(map));
+    // TODO use variables
+    // TODO support ringbuf
+    auto format_args_map = std::make_unique<T>("format_args", libbpf::BPF_MAP_TYPE_PERCPU_HASH, 4, 512, 128, 0);
+    failed_maps += is_invalid_map(format_args_map->mapfd_);
+    bpftrace.maps.Set(MapManager::Type::FormatArgs, std::move((format_args_map)));
   }
   // When available, ringbuf is used for built-ins like printf, cat.
   if (bpftrace.feature_->has_map_ringbuf())

@@ -1418,6 +1418,117 @@ void IRBuilderBPF::CreateRingbufOutput(Value *data,
   SetInsertPoint(merge_block);
 }
 
+
+Value *IRBuilderBPF::CreateAllocatePerCPUBuffer(Value *ctx, StructType* fmt_struct, const std::string &call_name, const location &loc)
+{
+  Value *fmt_args;
+  AllocaInst *key = CreateAllocaBPF(getInt32Ty(), "key");
+  CreateStore(getInt32(0), key);
+  CallInst *call = createMapLookup(bpftrace_.maps[MapManager::Type::FormatArgs].value()->id, key);
+  CreateHelperErrorCond(ctx, call, libbpf::BPF_FUNC_map_lookup_elem, loc, true);
+
+  Function *parent = GetInsertBlock()->getParent();
+  BasicBlock *lookup_success_block = BasicBlock::Create(module_.getContext(),
+                                                        "lookup_success",
+                                                        parent);
+  BasicBlock *lookup_failure_block = BasicBlock::Create(module_.getContext(),
+                                                        "lookup_failure",
+                                                        parent);
+  BasicBlock *lookup_merge_block = BasicBlock::Create(module_.getContext(),
+                                                      "lookup_merge",
+                                                      parent);
+
+  Value *condition = CreateICmpNE(
+      CreateIntCast(call, getInt8PtrTy(), true),
+      ConstantExpr::getCast(Instruction::IntToPtr, getInt64(0), getInt8PtrTy()),
+      "map_lookup_cond");
+  CreateCondBr(condition, lookup_success_block, lookup_failure_block);
+
+  SetInsertPoint(lookup_success_block);
+  fmt_args = CreatePointerCast(call, fmt_struct->getPointerTo());
+  debug(1, loc);
+
+  CreateBr(lookup_merge_block);
+
+  SetInsertPoint(lookup_failure_block);
+  debug(2, loc);
+  CreateRet(getInt64(1));
+
+  CreateBr(lookup_merge_block);
+
+  SetInsertPoint(lookup_merge_block);
+  CreateLifetimeEnd(key);
+  return fmt_args;
+}
+
+
+Value *IRBuilderBPF::CreatePerCPUBuffer(StructType* fmt_struct, const std::string &call_name, const location &loc)
+{
+  Value *fmt_args;
+  AllocaInst *key = CreateAllocaBPF(getInt32Ty(), "key");
+  CreateStore(getInt32(0), key);
+  CallInst *call = createMapLookup(bpftrace_.maps[MapManager::Type::FormatArgs].value()->id, key);
+
+  Function *parent = GetInsertBlock()->getParent();
+  BasicBlock *lookup_success_block = BasicBlock::Create(module_.getContext(),
+                                                        "lookup_success",
+                                                        parent);
+  BasicBlock *lookup_failure_block = BasicBlock::Create(module_.getContext(),
+                                                        "lookup_failure",
+                                                        parent);
+  BasicBlock *lookup_merge_block = BasicBlock::Create(module_.getContext(),
+                                                      "lookup_merge",
+                                                      parent);
+
+  Value *condition = CreateICmpNE(
+      CreateIntCast(call, getInt8PtrTy(), true),
+      ConstantExpr::getCast(Instruction::IntToPtr, getInt64(0), getInt8PtrTy()),
+      "map_lookup_cond");
+  CreateCondBr(condition, lookup_success_block, lookup_failure_block);
+
+  SetInsertPoint(lookup_success_block);
+  fmt_args = CreatePointerCast(call, fmt_struct->getPointerTo());
+  debug(1, loc);
+
+  CreateBr(lookup_merge_block);
+
+  SetInsertPoint(lookup_failure_block);
+  fmt_args = CreateAllocaBPF(fmt_struct, call_name + "_args");
+  debug(2, loc);
+
+  CreateBr(lookup_merge_block);
+
+  SetInsertPoint(lookup_merge_block);
+  CreateLifetimeEnd(key);
+  return fmt_args;
+}
+
+void IRBuilderBPF::debug(Value *output, const location &loc)
+{
+  // add debugf("%d", 9) in the prog before use
+  // format string was pre-saved in the map, referenced by mapped_printf_id_
+  auto mapid = bpftrace_.maps[MapManager::Type::MappedPrintfData].value()->id;
+  auto ids = bpftrace_.resources.mapped_printf_ids.at(0);
+  auto idx = std::get<0>(ids);
+  auto size = std::get<1>(ids);
+
+  Value *map_data = CreateBpfPseudoCallValue(mapid);
+  Value *fmt = CreateAdd(map_data, getInt64(idx));
+
+  std::vector<Value *> values;
+  values.push_back(output);
+
+  CreateTracePrintk(CreateIntToPtr(fmt, getInt8PtrTy()),
+                    getInt32(size),
+                    values,
+                    loc);
+}
+
+void IRBuilderBPF::debug(int output, const location &loc)
+{
+  debug(getInt64(output), loc);
+}
+
 void IRBuilderBPF::CreateAtomicIncCounter(int mapid, uint32_t idx)
 {
   AllocaInst *key = CreateAllocaBPF(getInt32Ty(), "key");

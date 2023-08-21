@@ -992,7 +992,7 @@ void CodegenLLVM::visit(Call &call)
     }
     else
     {
-      createFormatStringCall(call,
+      createFormatStringCall(ctx_, call,
                              printf_id_,
                              bpftrace_.resources.printf_args,
                              "printf",
@@ -1026,7 +1026,7 @@ void CodegenLLVM::visit(Call &call)
   }
   else if (call.func == "system")
   {
-    createFormatStringCall(call,
+    createFormatStringCall(ctx_, call,
                            system_id_,
                            bpftrace_.resources.system_args,
                            "system",
@@ -1035,7 +1035,7 @@ void CodegenLLVM::visit(Call &call)
   else if (call.func == "cat")
   {
     createFormatStringCall(
-        call, cat_id_, bpftrace_.resources.cat_args, "cat", AsyncAction::cat);
+        ctx_, call, cat_id_, bpftrace_.resources.cat_args, "cat", AsyncAction::cat);
   }
   else if (call.func == "exit")
   {
@@ -3185,7 +3185,7 @@ MDNode *CodegenLLVM::createLoopMetadata()
   return loopid;
 }
 
-void CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_args,
+void CodegenLLVM::createFormatStringCall(Value *ctx, Call &call, int &id, CallArgs &call_args,
                                          const std::string &call_name, AsyncAction async_action)
 {
   /*
@@ -3196,12 +3196,14 @@ void CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_arg
    */
   std::vector<llvm::Type *> elements = { b_.getInt64Ty() }; // ID
 
+  // args is the format specifiers for current printf call
   auto &args = std::get<1>(call_args.at(id));
   for (Field &arg : args)
   {
     llvm::Type *ty = b_.GetType(arg.type);
     elements.push_back(ty);
   }
+  // all the to-print elements
   StructType *fmt_struct = StructType::create(elements, call_name + "_t", false);
   int struct_size = datalayout().getTypeAllocSize(fmt_struct);
 
@@ -3209,10 +3211,17 @@ void CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_arg
   for (size_t i=0; i<args.size(); i++)
   {
     Field &arg = args[i];
+    // arg is a specifier
+    // set arg with struct field's element offset
     arg.offset = struct_layout->getElementOffset(i+1); // +1 for the id field
   }
 
-  AllocaInst *fmt_args = b_.CreateAllocaBPF(fmt_struct, call_name + "_args");
+  Value *fmt_args = b_.CreateAllocatePerCPUBuffer(ctx, fmt_struct, call_name, call.loc);
+
+  // TODO below is original version, store everything on the stack, we move this case into CreatePerCPUBuffer
+  // create the fmt_args object and then init it
+//  AllocaInst *fmt_args = b_.CreateAllocaBPF(fmt_struct, call_name + "_args");
+
   // as the struct is not packed we need to memset it.
   b_.CREATE_MEMSET(fmt_args, b_.getInt8(0), struct_size, 1);
 
@@ -3228,14 +3237,22 @@ void CodegenLLVM::createFormatStringCall(Call &call, int &id, CallArgs &call_arg
     Value *offset = b_.CreateGEP(fmt_struct,
                                  fmt_args,
                                  { b_.getInt32(0), b_.getInt32(i) });
-    if (needMemcpy(arg.type))
+    std::cout << "arg type: " << arg.type << "\n";
+    std::cout << "arg size: " << arg.type.GetSize() << "\n";
+    if (needMemcpy(arg.type)) {
+      std::cout << "arg type 1\n";
       b_.CREATE_MEMCPY(offset, expr_, arg.type.GetSize(), 1);
-    else if (arg.type.IsIntegerTy() && arg.type.GetSize() < 8)
+    }
+    else if (arg.type.IsIntegerTy() && arg.type.GetSize() < 8) {
+      std::cout << "arg type 2\n";
       b_.CreateStore(
           b_.CreateIntCast(expr_, b_.getInt64Ty(), arg.type.IsSigned()),
           offset);
-    else
+    }
+    else {
+      std::cout << "arg type 3\n";
       b_.CreateStore(expr_, offset);
+    }
   }
 
   id++;

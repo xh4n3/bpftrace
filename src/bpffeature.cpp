@@ -178,6 +178,8 @@ bool BPFfeature::detect_map(enum libbpf::bpf_map_type map_type)
       value_size = 8;
       break;
     case libbpf::BPF_MAP_TYPE_RINGBUF:
+      // mock perf_event only
+      return false;
       // values from libbpf/src/libbpf_probes.c
       // default pagesize 4KB
       // default perf_rb_pages 64

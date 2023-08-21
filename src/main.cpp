@@ -267,7 +267,7 @@ static std::optional<struct timespec> get_delta_taitime()
   // bytes. I've set the bar lower, in case your program has a deeper stack than
   // the one from my tests, in the hope that you'll get this instructive error
   // instead of getting the BPF verifier's error.
-  if (bpftrace.strlen_ > 200)
+  if (bpftrace.strlen_ > 512)
   {
     // the verifier errors you would encounter when attempting larger
     // allocations would be: >240=  <Looks like the BPF stack limit of 512 bytes

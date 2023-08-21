@@ -60,9 +60,12 @@ public:
     PerfEvent,
     Join,
     Elapsed,
+    // stores format specifiers
     MappedPrintfData,
     Ringbuf,
     RingbufLossCounter,
+    // stores real arg values
+    FormatArgs,
   };
 
   void Set(Type t, std::unique_ptr<IMap> map);

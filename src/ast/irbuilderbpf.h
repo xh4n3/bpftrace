@@ -185,6 +185,11 @@ public:
                     Value *data,
                     size_t size,
                     const location *loc = nullptr);
+  Value *CreateAllocatePerCPUBuffer(Value *ctx, StructType* fmt_struct, const std::string &call_name, const location &loc);
+  Value *CreatePerCPUBuffer(StructType* fmt_struct, const std::string &call_name, const location &loc);
+  void CreateUpdatePerCPUBuffer(Value *fmt_args, const location &loc);
+  void debug(int output, const location &loc);
+  void debug(Value *output, const location &loc);
   void CreateAtomicIncCounter(int mapfd, uint32_t idx);
   void CreateTracePrintk(Value *fmt,
                          Value *fmt_size,
