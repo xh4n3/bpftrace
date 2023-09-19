@@ -34,6 +34,7 @@
 #include "printf.h"
 #include "relocator.h"
 #include "resolve_cgroupid.h"
+#include "tracefs.h"
 #include "triggers.h"
 #include "utils.h"
 
@@ -1325,6 +1326,12 @@ int BPFtrace::run(BpfBytecode bytecode)
 
 int BPFtrace::setup_output()
 {
+  if (debug_output_)
+  {
+    int err = setup_debug_output();
+    if (err)
+      return err;
+  }
   if (is_ringbuf_enabled())
   {
     int err = setup_ringbuf();
@@ -1334,6 +1341,34 @@ int BPFtrace::setup_output()
   if (is_perf_event_enabled())
   {
     return setup_perf_events();
+  }
+  return 0;
+}
+
+int BPFtrace::setup_debug_output()
+{
+  debug_epollfd_ = epoll_create1(EPOLL_CLOEXEC);
+  if (debug_epollfd_ == -1)
+  {
+    LOG(ERROR) << "Failed to create debug epollfd: " << strerror(errno);
+    return -1;
+  }
+
+  int trace_pipe_fd = open(tracefs::trace_pipe().c_str(), O_RDONLY);
+  if (trace_pipe_fd == -1)
+  {
+    LOG(ERROR) << "Failed to open trace pipe: " << strerror(errno);
+    return -1;
+  }
+
+  struct epoll_event ev = {};
+  ev.events = EPOLLIN;
+  ev.data.fd = trace_pipe_fd;
+
+  if (epoll_ctl(debug_epollfd_, EPOLL_CTL_ADD, trace_pipe_fd, &ev) == -1)
+  {
+    LOG(ERROR) << "Failed to add reader to epoll: " << strerror(errno);
+    return -1;
   }
   return 0;
 }
@@ -1404,13 +1439,20 @@ void BPFtrace::teardown_output()
     ring_buffer__free(ringbuf_);
 
   if (is_perf_event_enabled())
+  {
     // Calls perf_reader_free() on all open perf buffers.
     open_perf_buffers_.clear();
+    close(epollfd_);
+  }
+
+  if (debug_output_)
+    close(debug_epollfd_);
 }
 
 void BPFtrace::poll_output(bool drain)
 {
   int ready;
+  bool do_poll_debug_output = debug_output_;
   bool do_poll_perf_event = is_perf_event_enabled();
   bool do_poll_ringbuf = is_ringbuf_enabled();
   auto should_retry = [](int ready) {
@@ -1438,6 +1480,19 @@ void BPFtrace::poll_output(bool drain)
 
   while (true)
   {
+    if (do_poll_debug_output)
+    {
+      ready = poll_debug_output();
+      if (should_retry(ready))
+      {
+        if (!do_poll_debug_output)
+          continue;
+      }
+      if (should_stop(ready))
+      {
+        do_poll_debug_output = false;
+      }
+    }
     if (do_poll_perf_event)
     {
       ready = poll_perf_events();
@@ -1499,6 +1554,29 @@ int BPFtrace::poll_perf_events()
   for (int i = 0; i < ready; i++)
   {
     perf_reader_event_read((perf_reader *)events[i].data.ptr);
+  }
+  return ready;
+}
+
+int BPFtrace::poll_debug_output()
+{
+  char buf[256 + 1];
+  auto events = std::vector<struct epoll_event>(1);
+  int ready = epoll_wait(debug_epollfd_, events.data(), 1, 0);
+  if (ready <= 0)
+    return ready;
+  int bytes_read;
+  for (int i = 0; i < ready; i++)
+  {
+    bytes_read = read(events[i].data.fd, buf, sizeof(buf) - 1);
+    buf[bytes_read] = '\0';
+    // in case if it read more than one line, cut it
+    char *line = strtok(buf, "\n");
+    if (line != NULL &&
+        std::string(line).find("BPFTRACE_DEBUG_OUTPUT") != std::string::npos)
+    {
+      LOG(DEBUG) << line;
+    }
   }
   return ready;
 }
