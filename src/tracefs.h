@@ -24,6 +24,11 @@ inline std::string available_filter_functions()
   return path("available_filter_functions");
 }
 
+inline std::string trace_pipe()
+{
+  return path("trace_pipe");
+}
+
 std::string event_format_file(const std::string &category,
                               const std::string &event);
 

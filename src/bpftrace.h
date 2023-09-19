@@ -203,6 +203,7 @@ public:
   uint64_t max_type_res_iterations = 0;
   bool demangle_cpp_symbols_ = true;
   bool resolve_user_symbols_ = true;
+  bool debug_output_ = false;
   enum class UserSymbolCacheType
   {
     per_pid,
@@ -258,6 +259,7 @@ private:
       int pid,
       bool file_activation);
   int setup_output();
+  int set_debug_output();
   int setup_perf_events();
   int setup_ringbuf();
   // when the ringbuf feature is available, enable ringbuf for built-ins like
@@ -274,6 +276,7 @@ private:
   }
   void teardown_output();
   void poll_output(bool drain = false);
+  int poll_debug_output();
   int poll_perf_events();
   void handle_ringbuf_loss();
   int print_map_hist(IMap &map, uint32_t top, uint32_t div);
@@ -282,6 +285,7 @@ private:
   std::vector<uint8_t> find_empty_key(IMap &map, size_t size) const;
   bool has_iter_ = false;
   int epollfd_ = -1;
+  int debug_epollfd_ = -1;
   struct ring_buffer *ringbuf_ = nullptr;
   uint64_t ringbuf_loss_count_ = 0;
 

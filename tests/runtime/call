@@ -532,6 +532,12 @@ RUN echo > /sys/kernel/debug/tracing/trace; {{BPFTRACE}} -e 'i:ms:1 { printf("pr
 EXPECT bpf_trace_printk: debugf 1
 TIMEOUT 3
 
+NAME debugf_to_foreground
+PROG i:ms:1 { debugf("[BPFTRACE_DEBUG_OUTPUT] debugf"); exit();}
+ENV BPFTRACE_DEBUG_OUTPUT=1
+EXPECT bpf_trace_printk: \[BPFTRACE_DEBUG_OUTPUT\] debugf
+TIMEOUT 3
+
 NAME nsecs
 PROG i:ms:1 { printf("SUCCESS %d\n", nsecs()); exit(); }
 EXPECT SUCCESS -?[0-9][0-9]*

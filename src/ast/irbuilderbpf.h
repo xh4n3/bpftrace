@@ -185,6 +185,9 @@ public:
                     size_t size,
                     const location *loc = nullptr);
   void CreateAtomicIncCounter(int mapfd, uint32_t idx);
+  void CreateDebugOutput(std::string fmt_str,
+                         const std::vector<Value *> &values,
+                         const location &loc);
   void CreateTracePrintk(Value *fmt,
                          Value *fmt_size,
                          const std::vector<Value *> &values,
