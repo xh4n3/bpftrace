@@ -33,18 +33,15 @@ entry:
   %8 = bitcast i32* %lookup_join_key to i8*
   call void @llvm.lifetime.end.p0i8(i64 -1, i8* %8)
   %lookup_join_cond = icmp ne i8* %lookup_join_map, null
-  br i1 %lookup_join_cond, label %lookup_join_success, label %lookup_join_failure
+  br i1 %lookup_join_cond, label %lookup_join_merge, label %lookup_join_failure
 
 failure_callback:                                 ; preds = %counter_merge, %lookup_join_failure
   ret i64 0
 
-lookup_join_success:                              ; preds = %entry
-  br label %lookup_join_merge
-
 lookup_join_failure:                              ; preds = %entry
   br label %failure_callback
 
-lookup_join_merge:                                ; preds = %lookup_join_success
+lookup_join_merge:                                ; preds = %entry
   %9 = bitcast i8* %lookup_join_map to i64*
   store i64 30005, i64* %9, align 8
   %10 = getelementptr i8, i8* %lookup_join_map, i64 8
