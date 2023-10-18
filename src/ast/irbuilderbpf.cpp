@@ -394,8 +394,6 @@ CallInst *IRBuilderBPF::createGetScratchMap(int mapid,
   CreateLifetimeEnd(keyAlloc);
 
   Function *parent = GetInsertBlock()->getParent();
-  BasicBlock *lookup_success_block = BasicBlock::Create(
-      module_.getContext(), "lookup_" + name + "_success", parent);
   BasicBlock *lookup_failure_block = BasicBlock::Create(
       module_.getContext(), "lookup_" + name + "_failure", parent);
   BasicBlock *lookup_merge_block = BasicBlock::Create(
@@ -404,10 +402,7 @@ CallInst *IRBuilderBPF::createGetScratchMap(int mapid,
       CreateIntCast(call, getInt8PtrTy(), true),
       ConstantExpr::getCast(Instruction::IntToPtr, getInt64(0), getInt8PtrTy()),
       "lookup_" + name + "_cond");
-  CreateCondBr(condition, lookup_success_block, lookup_failure_block);
-
-  SetInsertPoint(lookup_success_block);
-  CreateBr(lookup_merge_block);
+  CreateCondBr(condition, lookup_merge_block, lookup_failure_block);
 
   SetInsertPoint(lookup_failure_block);
   if (bpftrace_.debug_output_)
